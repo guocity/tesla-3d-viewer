@@ -21,6 +21,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.rayTracer = RayTracer(device: device)
         self.appState = AppState()
         
+        // Command-line arguments: --model <id> and --tour
+        if let modelArgIndex = CommandLine.arguments.firstIndex(of: "--model"),
+           modelArgIndex + 1 < CommandLine.arguments.count {
+            let requestedId = CommandLine.arguments[modelArgIndex + 1].lowercased()
+            if let found = TeslaCatalog.models.first(where: {
+                $0.id.lowercased() == requestedId ||
+                $0.name.lowercased().contains(requestedId) ||
+                $0.filename.lowercased().contains(requestedId)
+            }) {
+                self.appState.selectModel(found)
+            }
+        }
+        
+        if CommandLine.arguments.contains("--tour") {
+            self.appState.isTouring = true
+        }
+        
         let contentView = ContentView(state: appState, rayTracer: rayTracer)
         let hostingView = NSHostingView(rootView: contentView)
         

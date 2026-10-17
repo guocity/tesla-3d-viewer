@@ -136,6 +136,73 @@ public struct ContentView: View {
                     )
                     .cornerRadius(6)
                     
+                    // Navigation Mode (Orbit 3D vs Pan Move)
+                    HStack(spacing: 2) {
+                        Button(action: { state.navMode = .orbit }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("Orbit")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(state.navMode == .orbit ? Color.white.opacity(0.25) : Color.clear)
+                            .cornerRadius(5)
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Orbit 3D: Drag to rotate view around car")
+                        
+                        Button(action: { state.navMode = .pan }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("Pan")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(state.navMode == .pan ? Color.blue.opacity(0.8) : Color.clear)
+                            .cornerRadius(5)
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Pan Move: Drag to smoothly slide car across viewport")
+                    }
+                    .padding(2)
+                    .background(Color.black.opacity(0.45))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .cornerRadius(6)
+                    
+                    // Quick Factory Privacy Glass Toggle Pill
+                    Button(action: {
+                        state.isPrivacyTintEnabled.toggle()
+                        rayTracer.resetAccumulation()
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: state.isPrivacyTintEnabled ? "circle.righthalf.filled" : "circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(state.isPrivacyTintEnabled ? .indigo : .white.opacity(0.5))
+                            Text(state.isPrivacyTintEnabled ? "Privacy Tint" : "Clear Glass")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(state.isPrivacyTintEnabled ? Color.indigo.opacity(0.45) : Color.black.opacity(0.45))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(state.isPrivacyTintEnabled ? Color.indigo.opacity(0.8) : Color.white.opacity(0.15), lineWidth: 1)
+                        )
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Toggle Factory Privacy Glass on rear windows & panoramic roof (Model Y & Model X)")
+                    
                     // Sidebar Studio Customizer Toggle
                     Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isSidebarVisible.toggle() } }) {
                         HStack(spacing: 6) {
@@ -166,15 +233,174 @@ public struct ContentView: View {
                 
                 Spacer()
                 
+                // Floating On-Screen Navigation Controls (Pan D-Pad, Recenter, Zoom In/Out, Gesture Legend)
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            // D-Pad Grid for 1-Click Pan
+                            VStack(spacing: 2) {
+                                Button(action: {
+                                    state.camera.pan(deltaX: 0, deltaY: 28)
+                                    rayTracer.resetAccumulation()
+                                }) {
+                                    Image(systemName: "chevron.up")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .frame(width: 24, height: 18)
+                                        .background(Color.white.opacity(0.15))
+                                        .cornerRadius(3)
+                                        .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Pan Up")
+                                
+                                HStack(spacing: 2) {
+                                    Button(action: {
+                                        state.camera.pan(deltaX: 28, deltaY: 0)
+                                        rayTracer.resetAccumulation()
+                                    }) {
+                                        Image(systemName: "chevron.left")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .frame(width: 18, height: 24)
+                                            .background(Color.white.opacity(0.15))
+                                            .cornerRadius(3)
+                                            .foregroundColor(.white)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Pan Left")
+                                    
+                                    Button(action: {
+                                        let center = rayTracer.currentScene?.center ?? SIMD3<Float>(0, 0.7, 0)
+                                        state.camera.recenter(center: center)
+                                        rayTracer.resetAccumulation()
+                                    }) {
+                                        Image(systemName: "scope")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .frame(width: 24, height: 24)
+                                            .background(Color.white.opacity(0.25))
+                                            .cornerRadius(4)
+                                            .foregroundColor(.white)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Recenter pivot to vehicle")
+                                    
+                                    Button(action: {
+                                        state.camera.pan(deltaX: -28, deltaY: 0)
+                                        rayTracer.resetAccumulation()
+                                    }) {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .frame(width: 18, height: 24)
+                                            .background(Color.white.opacity(0.15))
+                                            .cornerRadius(3)
+                                            .foregroundColor(.white)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Pan Right")
+                                }
+                                
+                                Button(action: {
+                                    state.camera.pan(deltaX: 0, deltaY: -28)
+                                    rayTracer.resetAccumulation()
+                                }) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .frame(width: 24, height: 18)
+                                        .background(Color.white.opacity(0.15))
+                                        .cornerRadius(3)
+                                        .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Pan Down")
+                            }
+                            
+                            // Zoom buttons (+ / −)
+                            VStack(spacing: 3) {
+                                Button(action: {
+                                    state.camera.zoom(delta: 0.90)
+                                    rayTracer.resetAccumulation()
+                                }) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.white.opacity(0.15))
+                                        .cornerRadius(4)
+                                        .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Zoom in")
+                                
+                                Button(action: {
+                                    state.camera.zoom(delta: 1.10)
+                                    rayTracer.resetAccumulation()
+                                }) {
+                                    Image(systemName: "minus")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .frame(width: 24, height: 24)
+                                        .background(Color.white.opacity(0.15))
+                                        .cornerRadius(4)
+                                        .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Zoom out")
+                            }
+                        }
+                        
+                        Text("Trackpad: 2 fingers Pan • Pinch Zoom • 1 finger Orbit\nMouse: Drag Orbit • Shift / Right drag Pan")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.60))
+                            .lineSpacing(2)
+                    }
+                    .padding(8)
+                    .background(
+                        VisualEffectView(material: .hudWindow, blendingMode: .withinWindow).opacity(0.92)
+                    )
+                    .cornerRadius(8)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 2)
+                
                 // Bottom Camera Dock & Samples Progress Bar
                 HStack(alignment: .center, spacing: 12) {
-                    // Camera Presets
+                    // Cinematic Tour & Turntable Controls
                     HStack(spacing: 6) {
-                        cameraPresetButton(title: "Hero 3/4", preset: .hero)
-                        cameraPresetButton(title: "Side Profile", preset: .side)
-                        cameraPresetButton(title: "Front Fascia", preset: .front)
-                        cameraPresetButton(title: "Rear 3/4", preset: .rear)
-                        cameraPresetButton(title: "Top Aero", preset: .top)
+                        // Cinematic Tour Showcase
+                        Button(action: {
+                            state.isTouring.toggle()
+                        }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: state.isTouring ? "pause.circle.fill" : "play.circle.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(state.isTouring ? "Pause Tour" : "Cinematic Tour")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(state.isTouring ? Color.red.opacity(0.90) : Color.red.opacity(0.60))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Tour the vehicle with smooth cinematic camera angles")
+                        
+                        if state.isTouring {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 6, height: 6)
+                                Text(state.tourStageName)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.white)
+                                Text("\(Int(state.tourProgress * 100))%")
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.70))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.12))
+                            .cornerRadius(5)
+                        }
                         
                         Divider().frame(height: 18).background(Color.white.opacity(0.25))
                         
@@ -192,6 +418,38 @@ public struct ContentView: View {
                             .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
+                        
+                        Divider().frame(height: 18).background(Color.white.opacity(0.25))
+                        
+                        // Camera Presets
+                        cameraPresetButton(title: "Hero 3/4", preset: .hero)
+                        cameraPresetButton(title: "Side Profile", preset: .side)
+                        cameraPresetButton(title: "Front Fascia", preset: .front)
+                        cameraPresetButton(title: "Rear 3/4", preset: .rear)
+                        cameraPresetButton(title: "Top Aero", preset: .top)
+                        
+                        Divider().frame(height: 18).background(Color.white.opacity(0.25))
+                        
+                        // Recenter Pivot
+                        Button(action: {
+                            let center = rayTracer.currentScene?.center ?? SIMD3<Float>(0, 0.7, 0)
+                            state.camera.recenter(center: center)
+                            rayTracer.resetAccumulation()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "scope")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Recenter")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.12))
+                            .cornerRadius(5)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Recenter camera target to vehicle center")
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -343,6 +601,38 @@ public struct ContentView: View {
                                 sliderRow(title: "Ground Reflectivity", value: $state.groundReflectivity, range: 0.0...1.0)
                                 sliderRow(title: "Ground Roughness", value: $state.groundRoughness, range: 0.0...0.45)
                             }
+                            
+                            Divider().background(Color.white.opacity(0.2))
+                            
+                            // Section 4: Factory Privacy Glass (Rear & Roof)
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("FACTORY PRIVACY GLASS (REAR & ROOF)")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.6))
+                                    Spacer()
+                                    Toggle("", isOn: $state.isPrivacyTintEnabled)
+                                        .toggleStyle(.switch)
+                                        .labelsHidden()
+                                        .scaleEffect(0.8)
+                                }
+                                
+                                Text("Model Y & Model X feature dark rear privacy glass & UV panoramic roof as factory standard.")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white.opacity(0.55))
+                                    .lineLimit(2)
+                                
+                                if state.isPrivacyTintEnabled {
+                                    HStack(spacing: 5) {
+                                        privacyPresetButton(name: "Limo 5%", darkness: 0.95)
+                                        privacyPresetButton(name: "Factory 20%", darkness: 0.80)
+                                        privacyPresetButton(name: "Subtle 45%", darkness: 0.55)
+                                        privacyPresetButton(name: "Clear", darkness: 0.15)
+                                    }
+                                    
+                                    sliderRow(title: "Tint Darkness", value: $state.privacyTintDarkness, range: 0.10...0.95)
+                                }
+                            }
                         }
                         .padding(16)
                     }
@@ -368,6 +658,23 @@ public struct ContentView: View {
                 switchModel(model)
             }
         }
+    }
+    
+    private func privacyPresetButton(name: String, darkness: Float) -> some View {
+        Button(action: {
+            state.isPrivacyTintEnabled = true
+            state.privacyTintDarkness = darkness
+            rayTracer.resetAccumulation()
+        }) {
+            Text(name)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(state.privacyTintDarkness == darkness && state.isPrivacyTintEnabled ? Color.indigo.opacity(0.7) : Color.white.opacity(0.12))
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
     }
     
     private func cameraPresetButton(title: String, preset: CameraPreset) -> some View {
