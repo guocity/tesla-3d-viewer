@@ -10,12 +10,16 @@ Native SwiftUI + Metal ray tracing viewer for the 12 vehicle scenes extracted fr
 - The inspector exposes 161 usable source clips as checkboxes with shared playback and scrubbing. Compatible clips play together; shorter clips hold their end pose, and selecting a clip that controls the same joint channel replaces its conflicting selection. All keyframes are retained, including compound falcon-wing tracks. Absent regional variants and sensor-only tracks are recorded in `../models/source-audit.json`.
 - Driving ports the APK road texture, lane placement, UV scrolling, and wheel-socket rotation. Climate ports the source airflow planes, edge-fade shader, timing and colors; its seamless noise is generated using Godot's OpenSimplex algorithm and the APK's parameters. Charging uses the APK cable meshes, source charge-port anchor, and flow shader.
 - Cybertruck wheels attach to the animated source Spatials, including the rear axle; the suspension raises the body while keeping all four tires grounded. Windows use neutral optical transmission with optional privacy tint, independent of Godot blend colors.
-- Light covers use neutral 99% optical transmission and traverse nested lens shells, so the source light assemblies remain visible. Rubber uses a matte, nonmetallic finish with a subdued reflection lobe. These are viewer material calibrations; APK resource bindings remain intact.
+- Light covers use neutral 100% optical transmission and adjustable reflection (15% of the ordinary glass Fresnel response by default) and traverse nested lens shells, so the source light assemblies remain visible. Rubber uses a matte, nonmetallic finish with a subdued reflection lobe. These are viewer material calibrations; APK resource bindings remain intact.
 - Area-light sampling produces soft ray-traced shadows; ground occlusion supplies tire contact shadows. Progressive rendering resumes after camera movement stops.
 
 ## Controls
 
-Two-finger motion or left/middle drag orbits. Hold Shift to pan; right drag also pans. Pinch, mouse wheel, or Control + two fingers zooms. Gestures keep their initial mode until release, ignore trackpad momentum, and scale pan speed to distance and viewport size. Next Model in the header cycles through vehicles and wraps at the end. Fit and the five camera presets frame the vehicle. The Tour button and Camera tour inspector restore the cinematic walkthrough, with speed, progress, and restart controls. Manual navigation stops camera automation. A persistent inspector contains model, paint, source-animation, runtime-effect and floor controls, plus a component/material audit. Runtime effects use the source's above-cabin airflow display. Charging opens the source charge-port clip and shows the US cable when that anchor exists.
+Two-finger motion or left/middle drag orbits. Hold Shift to pan; right drag also pans. Pinch, mouse wheel, or Control + two fingers zooms. Gestures keep their initial mode until release, ignore trackpad momentum, and scale pan speed to distance and viewport size. Next Model in the header cycles through vehicles and wraps at the end. During a tour it preserves the tour clock and stage, adapting the camera to the next vehicle. Fit and the five camera presets frame the vehicle. The Tour button and Camera tour inspector restore the cinematic walkthrough, with speed, progress, and restart controls. Manual navigation stops camera automation. A persistent inspector contains model, paint, source-animation, runtime-effect and floor controls, plus a component/material audit. Airflow uses the source planes and noise, with ray-traced visibility: opaque panels block it, glass transmits it, and a panel behind glass still blocks it. Charging opens the source charge-port clip and shows the US cable when that anchor exists.
+
+Finish contains **Window surrounds: Original / Chrome / Chrome delete** and a **Headlight reflection** slider. Original preserves source materials. The other finishes affect only exported window-surround triangles, isolated using source exterior/trim bindings and proximity to side-pane boundaries and the outer silhouette. This is a geometric viewer customization, rather than an APK component label; internal pillars, glass, lamps and interior chrome retain their materials. `models/source-audit.json` records selected triangle counts per source surface.
+
+Studio contains **Studio / Overcast / Golden hour / Blue hour** lighting and exposure. Presets change sky reflections, key-light position and color, ambient fill, floor illumination, and shadows together. The surface shader uses GGX direct specular and Fresnel environment reflection. The environments are procedural viewer lighting, not APK backgrounds or a full path tracer.
 
 ## Rebuild and verify
 
@@ -37,9 +41,11 @@ Offscreen exports use the same Metal shaders as the app:
 .build/release/TeslaMetalViewer --model model3_high --climate 1 --driving 30 --effect-time 2 --render-out /tmp/effects.png
 ```
 
+Use `--lighting golden-hour --trim chrome --paint pearl_white --exposure 1.2` for a lighting export; `--trim chrome-delete` selects black surrounds. `--lens-reflection 0` removes the outer light-cover reflection for inspection.
+
 Pass comma-separated clip names to `--animation` to render simultaneous clips, for example `--animation HoodAnimation,RFDoorAnimation`. In the app, check multiple clips, then Play or scrub their shared timeline. Play restarts from zero after reaching the end.
 
-`--validate-features` checks optical window/lens materials, matte rubber, all four Cybertruck tires at all six suspension keyframes, combined poses, conflicting selection, playback restart, tour motion, navigation routing, pan scaling, and model cycling.
+`--validate-features` checks optical window/lens materials, matte rubber, all four Cybertruck tires at all six suspension keyframes, combined poses, conflicting selection, playback restart, tour motion, navigation routing, pan scaling, and tour-preserving model cycling. It also executes the actual Metal airflow visibility function against opaque, glass, glass-plus-body, unobstructed, and beyond-plane geometry fixtures.
 
 `--climate 1` selects cool, `2` selects heat. `--driving` is signed mph. Unknown animation names fail explicitly. `--validate-models` loads every vehicle and verifies that every exported clip moves visible vertices.
 

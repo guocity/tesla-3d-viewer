@@ -9,6 +9,17 @@ public enum NavigationMode: String, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public enum LightingPreset: String, CaseIterable, Identifiable {
+    case studio = "Studio", overcast = "Overcast", goldenHour = "Golden hour", blueHour = "Blue hour"
+    public var id: String { rawValue }
+    public var shaderIndex: Float { Float(Self.allCases.firstIndex(of: self) ?? 0) }
+}
+public enum WindowTrim: String, CaseIterable, Identifiable {
+    case source = "Original", chrome = "Chrome", delete = "Chrome delete"
+    public var id: String { rawValue }
+    public var shaderIndex: Float { Float(Self.allCases.firstIndex(of: self) ?? 0) }
+}
+
 public class AppState: ObservableObject {
     @Published public var selectedModel: TeslaCarModel = TeslaCatalog.models[0] {
         didSet {
@@ -42,6 +53,11 @@ public class AppState: ObservableObject {
         didSet { onMaterialChanged?() }
     }
     
+    @Published public var lighting: LightingPreset = .studio { didSet { onMaterialChanged?() } }
+    @Published public var exposure: Float = 1 { didSet { onMaterialChanged?() } }
+    @Published public var windowTrim: WindowTrim = .source { didSet { onMaterialChanged?() } }
+    @Published public var headlightReflection: Float = 0.15 { didSet { onMaterialChanged?() } }
+
     // Privacy Glass & Panoramic Roof Tint controls
     @Published public var isPrivacyTintEnabled: Bool = false {
         didSet { onMaterialChanged?() }
@@ -132,6 +148,17 @@ public class AppState: ObservableObject {
     
     public init() {}
     
+    public func frameLoadedModel(radius: Float, center: SIMD3<Float>, preset: CameraPreset = .hero) {
+        if isTouring {
+            // Keep the tour clock and stage while adapting framing to the new car.
+            let (progress,stage) = camera.updateTour(deltaTime: 0,radius: radius,center: center)
+            tourProgress = progress; tourStageName = stage
+        } else {
+            camera.applyPreset(preset,radius: radius,center: center)
+        }
+        onMaterialChanged?()
+    }
+
     public func nextModel() -> TeslaCarModel {
         let models = TeslaCatalog.models
         let index = models.firstIndex(where: { $0.id == selectedModel.id }) ?? 0

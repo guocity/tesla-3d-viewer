@@ -87,7 +87,7 @@ public struct ContentView: View {
                                             state.setAnimation(clip.name, enabled: true); state.animationTime = max(state.animationTime,clip.duration)
                                         }
                                     }
-                                Text("Road, airflow and cable effects ported from the APK scripts and shaders. Airflow displays above the cabin.").font(.caption).foregroundStyle(.secondary)
+                                Text("Road, airflow and cable effects ported from the APK scripts and shaders. Opaque body panels occlude airflow; glass transmits it.").font(.caption).foregroundStyle(.secondary)
                             }.padding(8)
                         }
                         GroupBox("Finish") {
@@ -98,6 +98,10 @@ public struct ContentView: View {
                                 control("Metallic", value: $state.metallic, range: 0...1)
                                 control("Roughness", value: $state.roughness, range: 0.03...1)
                                 control("Clearcoat", value: $state.clearcoat, range: 0...1)
+                                Picker("Window surrounds", selection: $state.windowTrim) {
+                                    ForEach(WindowTrim.allCases) { Text($0.rawValue).tag($0) }
+                                }
+                                control("Headlight reflection", value: $state.headlightReflection, range: 0...1)
                                 Toggle("Privacy tint override", isOn: $state.isPrivacyTintEnabled)
                                 if state.isPrivacyTintEnabled { control("Tint", value: $state.privacyTintDarkness, range: 0...1) }
                             }.padding(8)
@@ -115,6 +119,10 @@ public struct ContentView: View {
                         }
                         GroupBox("Studio") {
                             VStack(alignment: .leading, spacing: 12) {
+                                Picker("Lighting", selection: $state.lighting) {
+                                    ForEach(LightingPreset.allCases) { Text($0.rawValue).tag($0) }
+                                }
+                                control("Exposure", value: $state.exposure, range: 0.4...2.5)
                                 control("Floor reflection", value: $state.groundReflectivity, range: 0...1)
                                 control("Floor roughness", value: $state.groundRoughness, range: 0.02...0.5)
                                 Picker("Drag mode", selection: $state.navMode) { ForEach(NavigationMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
@@ -169,7 +177,10 @@ public struct ContentView: View {
             state.animations = rayTracer.currentScene?.animations ?? []
             state.totalTriangles = rayTracer.currentScene?.totalTriangles ?? 0
             state.totalVertices = rayTracer.currentScene?.totalVertices ?? 0
-            fit(state.initialPreset ?? .hero); state.initialPreset = nil
+            state.frameLoadedModel(radius: rayTracer.currentScene?.radius ?? 3,
+                                   center: rayTracer.currentScene?.center ?? .zero,
+                                   preset: state.initialPreset ?? .hero)
+            state.initialPreset = nil
         } else { state.loadError = "Unable to load \(state.selectedModel.filename)" }
     }
 }

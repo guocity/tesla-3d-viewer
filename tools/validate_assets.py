@@ -49,12 +49,14 @@ for item in json.loads((root/'models/catalog.json').read_text())['vehicles']:
             offset=view.get('byteOffset',0)+ia.get('byteOffset',0)
             indices=struct.unpack_from('<'+str(ia['count'])+('I' if ia['componentType']==5125 else 'H'),binary,offset)
             assert len(indices)%3==0 and max(indices)<count
+            trim=prim.get('extras',{}).get('windowTrimTriangles',[])
+            assert len(trim)==len(set(trim)) and all(0<=t<len(indices)//3 for t in trim)
     components=[]
     for index,node in enumerate(nodes):
         if 'mesh' not in node: continue
         for surface,prim in enumerate(gltf['meshes'][node['mesh']]['primitives']):
             material=gltf['materials'][prim['material']]
-            components.append({'node':index,'path':paths[index],'surface':surface,'material':material['extras']['sourcePath']})
+            components.append({'node':index,'path':paths[index],'surface':surface,'material':material['extras']['sourcePath'],'windowTrimTriangles':len(prim.get('extras',{}).get('windowTrimTriangles',[]))})
     report.append({'components':components,'vehicle':item['id'],'clips':len(clips),'tracks':sum(len(c['tracks']) for c in clips),'omitted':omitted,'materials':materials})
 (root/'models/source-audit.json').write_text(json.dumps(report,indent=2)+'\n')
 print(f"Validated {len(report)} vehicles, {sum(x['clips'] for x in report)} clips, {sum(x['tracks'] for x in report)} tracks")

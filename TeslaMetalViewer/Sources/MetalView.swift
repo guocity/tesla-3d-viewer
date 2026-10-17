@@ -142,6 +142,10 @@ public struct MetalViewport: NSViewRepresentable {
             if state.isDriving {
                 parent.rayTracer.wheelDegrees += min(state.drivingSpeed / 60,1) * 1000 * Float(dt)
             }
+            parent.rayTracer.lighting = state.lighting
+            parent.rayTracer.exposure = state.exposure
+            parent.rayTracer.windowTrim = state.windowTrim
+            parent.rayTracer.headlightReflection = state.headlightReflection
             parent.rayTracer.climateMode = state.climateMode
             parent.rayTracer.charging = state.isCharging
             let effectsActive = state.isDriving || state.climateMode > 0 || state.isCharging

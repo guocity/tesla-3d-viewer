@@ -286,9 +286,9 @@ public class GLBLoader {
                         let original = (ex["originalName"] as? String ?? "").lowercased()
                         if category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light") {
                             // Godot's dark blend color is not absorption in a clear optical lens.
-                            geom.baseColor = SIMD3(0.99,0.995,1)
-                            geom.metallic = 0; geom.roughness = 0.025
-                            geom.clearcoat = 0; geom.transmission = 0.99; geom.emissive = 0
+                            geom.baseColor = SIMD3(repeating: 1)
+                            geom.metallic = 0; geom.roughness = 0.008
+                            geom.clearcoat = 0; geom.transmission = 1; geom.emissive = 0
                             geom.textures = SIMD4(-1,-1,-1,64)
                         } else if category == "tire" {
                             geom.metallic = 0; geom.roughness = max(0.85,geom.roughness)
@@ -312,7 +312,21 @@ public class GLBLoader {
                         for t in stride(from:0,to:geom.indices.count,by:3) { geom.indices.swapAt(t+1,t+2) }
                     }
                     if effect(i,name:"chargeFlow") { geom.isGround = 3 }
-                    scene.geometries.append(geom)
+                    if let extras = prim["extras"] as? [String:Any],
+                       let triangles = extras["windowTrimTriangles"] as? [Int], !triangles.isEmpty {
+                        let mask = Set(triangles)
+                        var trim = geom; trim.indices = []; geom.indices = []
+                        // Keep source vertices and UVs; isolate only audited surround triangles.
+                        let originalIndices = (prim["indices"] as? Int).map { values($0,components:1).map { UInt32(max(0,$0[0])) } } ?? []
+                        for t in 0..<(originalIndices.count/3) {
+                            var face = Array(originalIndices[(t*3)..<(t*3+3)])
+                            if simd_determinant(basis) < 0 { face.swapAt(1,2) }
+                            if mask.contains(t) { trim.indices += face } else { geom.indices += face }
+                        }
+                        trim.textures.w |= 1024
+                        scene.geometries.append(trim)
+                    }
+                    if !geom.indices.isEmpty { scene.geometries.append(geom) }
                 }
             }
             guard !scene.geometries.isEmpty else { return nil }

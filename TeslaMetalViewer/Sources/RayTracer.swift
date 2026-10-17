@@ -25,6 +25,7 @@ public struct UniformsGPU {
     public var materialParams: SIMD4<Float> = .zero
     public var viewport: SIMD4<UInt32> = .zero
     public var tintParams: SIMD4<Float> = .zero
+    public var renderOptions = SIMD4<Float>(0,1,0,0.15)
 }
 
 public class RayTracer {
@@ -77,6 +78,11 @@ public class RayTracer {
     public var drivingSpeed: Float = 0
     public var wheelDegrees: Float = 0
     public var climateMode: Float = 0
+    public var lighting: LightingPreset = .studio { didSet { if oldValue != lighting { resetAccumulation() } } }
+    public var exposure: Float = 1 { didSet { if oldValue != exposure { resetAccumulation() } } }
+    public var windowTrim: WindowTrim = .source { didSet { if oldValue != windowTrim { resetAccumulation() } } }
+    public var headlightReflection: Float = 0.15 { didSet { if oldValue != headlightReflection { resetAccumulation() } } }
+
     public var charging = false
     private var modelURL: URL?
 
@@ -195,6 +201,37 @@ public class RayTracer {
 
     }
 
+    /// Exercise the actual visibility shader against opaque/glass/beyond-plane fixtures.
+    public func validateClimateOcclusion() -> [Float]? {
+        let saved = currentScene
+        defer { if let saved { buildAccelerationStructure(from: saved) } }
+        var scene = ModelSceneData()
+        func pane(x: Float, z: Float, transmission: Float) -> GeometryData {
+            var g=GeometryData(); g.transmission=transmission
+            g.vertices=[SIMD3(x-0.8,-0.8,z),SIMD3(x+0.8,-0.8,z),SIMD3(x,0.8,z)]
+                .map { RaytraceVertex(position: $0,normal: SIMD3(0,0,-1)) }
+            g.indices=[0,1,2]; return g
+        }
+        scene.geometries=[pane(x:0,z:0,transmission:0),pane(x:2,z:0,transmission:0.96),
+                          pane(x:4,z:0,transmission:0.96),pane(x:4,z:1,transmission:0),
+                          pane(x:8,z:3,transmission:0)]
+        buildAccelerationStructure(from: scene)
+        do {
+            let library=try device.makeLibrary(source: ShaderSource.metalRaytracingSource,options:nil)
+            guard let function=library.makeFunction(name:"climateOcclusionProbe"),
+                  let output=device.makeBuffer(length:5*MemoryLayout<Float>.stride,options:.storageModeShared),
+                  let command=commandQueue.makeCommandBuffer(),let encoder=command.makeComputeCommandEncoder() else { return nil }
+            let pipeline=try device.makeComputePipelineState(function:function)
+            encoder.setComputePipelineState(pipeline)
+            encoder.setAccelerationStructure(accelerationStructure,bufferIndex:0)
+            encoder.setBuffer(geometryBuffer,offset:0,index:1); encoder.setBuffer(output,offset:0,index:2)
+            encoder.dispatchThreads(MTLSize(width:5,height:1,depth:1),threadsPerThreadgroup:MTLSize(width:5,height:1,depth:1))
+            encoder.endEncoding();command.commit();command.waitUntilCompleted()
+            guard command.status == .completed else { return nil }
+            return Array(UnsafeBufferPointer(start:output.contents().assumingMemoryBound(to:Float.self),count:5))
+        } catch { print("Climate visibility probe failed: \(error)");return nil }
+    }
+
     public func resetAccumulation() {
         sampleIndex = 0
         isDirty = true
@@ -268,6 +305,7 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
+        uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4
@@ -368,6 +406,7 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
+        uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4

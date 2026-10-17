@@ -1039,6 +1039,8 @@ class GLBBuilder:
             "buffers": [{"byteLength": len(self.buffer)}],
         }
 
+        from window_trim import annotate
+        annotate(gltf, self.buffer)
         json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
         json_pad = (4 - (len(json_bytes) % 4)) % 4
         if json_pad:

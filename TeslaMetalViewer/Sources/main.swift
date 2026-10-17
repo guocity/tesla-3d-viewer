@@ -76,6 +76,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard rayTracer.loadModel(filename: model.filename), let rest = rayTracer.currentScene else {
                     failures.append(model.id + ": load failed"); continue
                 }
+                let surrounds = rest.geometries.filter { ($0.textures.w & 1024) != 0 }
+                if surrounds.isEmpty { failures.append(model.id + ": missing window surround mask") }
+                for g in surrounds where g.isPaint != 0 || g.transmission > 0 || (g.textures.w & 128) != 0 {
+                    failures.append(model.id + ": window trim overlaps paint, glass, or rubber material")
+                }
+                let tourState = AppState(); tourState.isTouring = true; tourState.camera.tourTime = 11.5
+                tourState.selectModel(model); tourState.frameLoadedModel(radius: rest.radius,center: rest.center)
+                if !tourState.isTouring || abs(tourState.camera.tourTime-11.5) > 0.0001 {
+                    failures.append(model.id + ": model change interrupted tour")
+                }
                 let lenses = rest.geometries.filter { ($0.textures.w & 64) != 0 }
                 if lenses.isEmpty { failures.append(model.id + ": no optical lenses") }
                 for g in lenses where g.transmission < 0.98 || g.baseColor.x < 0.98 || g.metallic != 0 {
@@ -166,7 +176,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 state.selectModel(TeslaCatalog.models[index])
                 if state.nextModel().id != TeslaCatalog.models[(index+1) % TeslaCatalog.models.count].id { failures.append("Next model wrap") }
             }
-            print("Navigation and model cycling checks passed")
+            if let visibility=rayTracer.validateClimateOcclusion() {
+                let expected: [Float]=[0,0.96,0,1,1]
+                if zip(visibility,expected).contains(where: { abs($0-$1)>0.001 }) { failures.append("Climate occlusion: \(visibility)") }
+                print("GPU climate visibility (opaque / glass / glass + body / open / behind airflow): \(visibility)")
+            } else { failures.append("Climate GPU visibility probe failed") }
+            if MemoryLayout<UniformsGPU>.stride != 384 { failures.append("GPU uniforms layout") }
+            print("Navigation, tour-preserving model cycling, trim isolation and GPU layout checks passed")
             print("Feature validation failures: \(failures)")
             exit(failures.isEmpty ? 0 : 1)
         }
@@ -181,6 +197,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let i = CommandLine.arguments.firstIndex(of: name), i+1 < CommandLine.arguments.count else { return nil }
                 return CommandLine.arguments[i+1]
             }
+            if let value = argument("--lighting") {
+                let key=value.lowercased().replacingOccurrences(of: "-",with: " ")
+                guard let lighting=LightingPreset.allCases.first(where: { $0.rawValue.lowercased() == key }) else { print("Unknown lighting: " + value); exit(1) }
+                rayTracer.lighting=lighting
+            }
+            if let value = argument("--trim") {
+                guard let trim=WindowTrim.allCases.first(where: { $0.rawValue.lowercased() == value.lowercased().replacingOccurrences(of: "-",with: " ") }) else { print("Unknown trim: " + value); exit(1) }
+                rayTracer.windowTrim=trim
+            }
+            if let value=argument("--paint"),let paint=TeslaCatalog.paints.first(where: { $0.id == value }) { appState.selectedPaint=paint }
+            rayTracer.exposure = max(0.4,min(2.5,Float(argument("--exposure") ?? "1") ?? 1))
+            rayTracer.headlightReflection = max(0,min(1,Float(argument("--lens-reflection") ?? "0.15") ?? 0.15))
             rayTracer.charging = CommandLine.arguments.contains("--charging")
             rayTracer.effectTime = Float(argument("--effect-time") ?? "2") ?? 2
             rayTracer.drivingSpeed = Float(argument("--driving") ?? "0") ?? 0

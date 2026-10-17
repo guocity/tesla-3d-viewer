@@ -32,5 +32,40 @@
       "previews/suspension-high.png",
       "previews/clear-windows.png"
     ]
+  },
+  "lightingTrimClimateFollowUp": {
+    "lighting": [
+      "Studio",
+      "Overcast",
+      "Golden hour",
+      "Blue hour"
+    ],
+    "headlightLensTransmission": 1,
+    "headlightReflectionDefault": 0.15,
+    "windowSurrounds": [
+      "Original",
+      "Chrome",
+      "Chrome delete"
+    ],
+    "trimMask": "source exterior bindings and outer side-pane boundary topology, excluding interior/doorcards; exported per triangle",
+    "tourContinuity": "all 12 models retain active tour clock and stage during framing",
+    "gpuAirflowVisibility": {
+      "opaque": 0,
+      "glass": 0.96,
+      "glassThenOpaque": 0,
+      "unobstructed": 1,
+      "occluderBeyondAirflow": 1
+    },
+    "featureValidation": "passed",
+    "previews": [
+      "previews/golden-hour-chrome.png",
+      "previews/golden-hour-delete.png",
+      "previews/headlight-clear.png",
+      "previews/climate-top.png",
+      "previews/bayberry-chrome.png",
+      "previews/blue-hour.png"
+    ],
+    "animationRegression": "161 clips passed",
+    "bundledGpuSmoke": "all 12 vehicles exported successfully"
   }
 }
