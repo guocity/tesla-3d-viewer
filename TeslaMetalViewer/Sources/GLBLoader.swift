@@ -218,28 +218,155 @@ public class GLBLoader {
                 let prefix = matName.contains("__") ? String(matName.components(separatedBy: "__")[0]) : ""
                 var cat = 13 // Default: Trim / Chassis
                 
-                if prefix == "paint" || matName == "mirror__paintskybox" || matName.contains("carpaint") || matName.contains("steel_exterior") || matName == "body" {
-                    cat = 1 // Car paint / stainless steel
-                } else if matName == "headlight__headlight_cover" || matName.starts(with: "glass_clear") {
-                    cat = 4 // Clear Headlight Glass Lens
-                } else if matName.starts(with: "glass_tinted") {
-                    cat = 3 // Tinted Glass Roof
+                // Charge Port and Rear Side Reflectors (refer to user Image 2)
+                let isChargeCap = nodeName.contains("charge_cap") || nodeName.contains("chargecap") ||
+                                  meshName.contains("charge_cap") || meshName.contains("chargecap") ||
+                                  nodeName.contains("charge_port_cover") || meshName.contains("charge_port_cover") ||
+                                  nodeName.contains("charge_port") || meshName.contains("charge_port")
+                
+                // Cybertruck & Front Lightbars (Cybertruck's signature horizontal front LED lightbar & roof lightbars: WHITE, NEVER BLACK!)
+                let isCybertruckLightbar = meshName.contains("lightbar") || nodeName.contains("lightbar") ||
+                                           matName.contains("lightbar") || meshName.contains("lights_hood") ||
+                                           nodeName.contains("lights_hood")
+                
+                // Model Y Refresh (bayberry) Front Lightbar & DRL (Signature front full-width horizontal lightbar: WHITE!)
+                let isRefreshFrontLightbar = (meshName.contains("static_exterior") || meshName.contains("fascia")) &&
+                                             (matName.contains("glass_lights") || matName.contains("drl") || matName.contains("headlight"))
+                
+                // Rear Lightbar & Taillight assembly
+                let isRearLightbar = (meshName.contains("trunk") || meshName.contains("lights_trunk") || prefix == "taillight") &&
+                                     (matName.contains("light") || matName.contains("illum") || matName.contains("reflector") || matName.contains("brake"))
+                
+                // Headlight & Front LED lighting
+                let isHeadlight = prefix == "headlight" || (prefix == "light" && !matName.contains("taillight") && !meshName.contains("trunk"))
+                
+                // Paint Fade materials (*_Fade) are inner roof bow crossmembers, windshield headers, and glass frame channels - NOT car body panels!
+                let isPaintFade = matName.contains("fade") && (matName.contains("paint") || matName.contains("exterior") || matName.contains("trim"))
+                
+                // Tesla Car Body Paint: ALWAYS checked FIRST before glass checks to preserve body panels!
+                let isPaintMaterial = (prefix == "paint" || 
+                                      matName.starts(with: "paint__") || 
+                                      matName == "mirror__paintskybox" || 
+                                      matName.contains("carpaint") || 
+                                      matName.contains("steel_exterior") || 
+                                      matName == "body") && !isPaintFade
+                
+                // Tesla Semi Cab Panels & Window Frames: Door frames, cab surrounds, roof aero, hood surround are painted car body color!
+                let isSemiCabBody = isSemi && (meshName.contains("door") || nodeName.contains("door") ||
+                                              meshName.contains("hood") || nodeName.contains("hood") ||
+                                              meshName.contains("roof_aero") || nodeName.contains("roof_aero") ||
+                                              meshName.contains("rear_closeout") || nodeName.contains("rear_closeout")) &&
+                                     !meshName.contains("card") && !nodeName.contains("card") &&
+                                     !matName.contains("glass")
+                
+                // Tesla Semi Windows: All side and rear door windows have deep factory privacy tint like Image 2!
+                let isSemiSideOrRearWindow = isSemi && (meshName.contains("window_l") || 
+                                                       meshName.contains("window_r") || 
+                                                       meshName == "window_l" || 
+                                                       meshName == "window_r" || 
+                                                       meshName.contains("body_extension") ||
+                                                       nodeName.contains("body_extension")) && 
+                                                       matName.contains("glass")
+                
+                // Front Side Windows & Windshield: ALWAYS 100% CLEAR TRANSPARENT GLASS (Cat 2)
+                let isFrontSideWindow = !isSemi && (meshName.contains("window_lf") || 
+                                        meshName.contains("window_rf") || 
+                                        meshName.contains("window_small_lf") || 
+                                        meshName.contains("window_small_rf") || 
+                                        meshName.contains("front_left_window") || 
+                                        meshName.contains("front_right_window") || 
+                                        meshName.contains("window_front") || 
+                                        meshName == "window_l" || 
+                                        meshName == "window_r" || 
+                                        meshName == "window_lf2" || 
+                                        meshName == "window_rf2")
+                
+                // Rear Windows, Hatch/Liftgate, and Rear Quarter (Opera) Glass: ALWAYS PRIVACY TINTED (Cat 3)
+                // Includes Tesla Semi door/side windows, Model Y Refresh (bayberry) Mesh 6 Trunk_Cover, Mesh 35 Static_Exterior quarter windows, etc.
+                let isRearWindow = isSemiSideOrRearWindow ||
+                                   meshName.contains("window_lr") || 
+                                   meshName.contains("window_rr") || 
+                                   meshName.contains("back_left_window") || 
+                                   meshName.contains("back_right_window") || 
+                                   meshName.contains("windows_rear") || 
+                                   meshName.contains("window_rear") || 
+                                   meshName.contains("windows_side") || 
+                                   meshName.contains("window_r2") || 
+                                   meshName.contains("window_lr2") || 
+                                   meshName.contains("window_rr2") || 
+                                   matName.contains("windows_dark") ||
+                                   ((meshName.contains("trunk_cover") || meshName.contains("static_exterior")) && (matName.contains("windows_dark") || matName.contains("glass_interior")))
+                
+                if isChargeCap {
+                    if matName.contains("light") || matName.contains("reflector") {
+                        // Red retro-reflector on charge port door & passenger reflector (refer to Image 2)
+                        cat = 9
+                    } else if matName.contains("exterior") || matName.contains("trim") || matName.contains("plastic") {
+                        // Gloss black surround bezel of charge port door (refer to Image 2)
+                        cat = 13
+                    } else if matName.contains("paint") || matName.contains("color") {
+                        cat = 1 // Body paint
+                    } else {
+                        cat = 9 // Red reflector
+                    }
+                } else if isCybertruckLightbar || isRefreshFrontLightbar {
+                    if matName.contains("cover") && !matName.contains("drl") && !matName.contains("lights") {
+                        cat = 4 // Clear Headlight Glass Lens
+                    } else {
+                        cat = 8 // White LED Lightbar / Illumination (Cybertruck & Model Y Refresh front lightbars are brilliant WHITE!)
+                    }
+                } else if isRearLightbar {
+                    cat = 9 // Taillight & Brake Light Ruby Red Reflector / LEDs
+                } else if nodeName.contains("chargeport") || meshName.contains("chargeport") {
+                    cat = 13 // Internal matte black charging socket plastic
+                } else if isPaintMaterial || isSemiCabBody {
+                    cat = 1 // Car paint / stainless steel / Tesla Semi cab door & window frame
+                } else if isFrontSideWindow {
+                    // Front door windows: ALWAYS 100% CLEAR TRANSPARENT GLASS
+                    cat = 2
+                } else if meshName.contains("windows_top") || nodeName.contains("windows_top") {
+                    let avgLocalX = posList.isEmpty ? 0.0 : (posList.reduce(0.0) { $0 + $1.x } / Float(posList.count))
+                    if avgLocalX > 0.10 {
+                        // Front Windshield!
+                        cat = 2 // Clear Transparent Windshield Glass
+                    } else {
+                        // Panoramic Glass Roof & Rear Glass!
+                        cat = 3 // Tinted Glass Roof & Privacy Tint
+                    }
+                } else if isRearWindow {
+                    cat = 3 // Tinted Rear Privacy Glass (All 3 rear glass panels in Model Y Refresh, hatch, quarter, doors)
+                } else if matName == "headlight__headlight_cover" || matName.starts(with: "glass_clear") || meshName.contains("lights_glass") {
+                    cat = 4 // Clear Headlight & Taillight Outer Glass Lens
+                } else if matName.contains("windows_dark") || matName.contains("glass_top") || matName.starts(with: "glass_tinted") {
+                    cat = 3 // Tinted Glass Roof & Rear Privacy Glass
                 } else if matName.starts(with: "glass") || matName.contains("window") || matName.contains("windshield") {
-                    cat = 2 // Windows & Windshield Glass
-                } else if prefix.starts(with: "wheel") || matName.contains("rotor") || matName.contains("brake_disc") {
+                    cat = 2 // Clear Windows Glass
+                } else if isHeadlight {
+                    if matName.contains("cover") || matName.contains("glass") {
+                        cat = 4 // Clear Headlight Outer Glass Lens
+                    } else if matName.contains("chrome") || matName.contains("aluminum") || matName.contains("reflector") {
+                        cat = 7 // Chrome Reflector
+                    } else {
+                        cat = 8 // Headlight White LEDs & DRL (White, NOT Black!)
+                    }
+                } else if matName.contains("upper_trim") || matName.contains("headliner") {
+                    cat = 11 // Interior Cabin & Seats (Dark automotive charcoal headliner/trim, NOT silver alloy!)
+                } else if (prefix.starts(with: "wheel") || matName.contains("rotor") || matName.contains("brake_disc")) && !matName.contains("trim") {
                     cat = 5 // Wheels
                 } else if prefix.starts(with: "tire") || matName.contains("rubber") {
                     cat = 6 // Tires
-                } else if prefix == "taillight" && (matName.contains("illum") || matName.contains("light")) && !matName.contains("light_off") && !matName.contains("trim") {
-                    cat = 9 // Taillight Red LEDs
-                } else if (prefix == "headlight" || prefix == "light") && (matName.contains("illum") || matName.contains("light") || matName.contains("drl")) && !matName.contains("cover") {
-                    cat = 8 // Headlight White LEDs
-                } else if matName.contains("trim__lights") || matName.contains("trim__reflector") || matName.contains("trim__light") || prefix.starts(with: "chrome") || prefix.starts(with: "mirror") || matName.contains("aluminum") || matName.contains("silver") {
-                    cat = 7 // Chrome, Mirror, Headlight Reflector
+                } else if prefix == "taillight" || meshName.contains("lights_trunk") || matName.contains("taillight") || matName.contains("brake") {
+                    cat = 9 // Taillight & Brake Light Ruby Red Reflector (Rich red, gloss clearcoat, no emissive blow-out!)
+                } else if matName.contains("trim__lights") || matName.contains("trim__reflector") || matName.contains("trim__light") || prefix.starts(with: "chrome") || matName == "mirror__mirror" || matName.contains("aluminum") || matName.contains("silver") {
+                    cat = 7 // Chrome Mirror glass / Headlight Reflector / Badging
                 } else if prefix.starts(with: "screen") || matName.contains("display") {
                     cat = 10 // Center Touchscreen
                 } else if prefix.starts(with: "interior_white") {
-                    cat = 12 // Interior White Seats/Trim
+                    if meshName.contains("body") || nodeName.contains("body") {
+                        cat = 13 // Interior B-pillar upper plastic is satin black trim matching pillar exterior
+                    } else {
+                        cat = 12 // Interior White Seats
+                    }
                 } else if prefix.starts(with: "interior") || prefix.starts(with: "wood") || prefix.starts(with: "caliper") {
                     cat = 11 // Interior Cabin & Seats
                 } else {
@@ -273,7 +400,263 @@ public class GLBLoader {
                     }
                 }
                 
-                rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: finalIndices, matCategory: cat))
+                let isDoorMesh = (meshName.contains("door") || nodeName.contains("door")) &&
+                                 !meshName.contains("card") && !nodeName.contains("card")
+                let isClassicModel3 = url.lastPathComponent.lowercased().contains("model3_high")
+                let isModelY = url.lastPathComponent.lowercased().contains("modely")
+                let beltlineThreshold: Float = isModelY ? 1.05 : 0.94
+                let isRefreshDoorOuter = isDoorMesh && (matName.contains("trim__cover") || matName.contains("wheel_rim__trim"))
+                let isStandardDoorTrim = isDoorMesh && matName.contains("trim__exterior")
+                let isStandardDoorPaint = isDoorMesh && isPaintMaterial
+                let isPaintMeshForSeparation = (cat == 1 || isPaintMaterial) && !isDoorMesh &&
+                                               !meshName.contains("hood") && !nodeName.contains("hood") &&
+                                               !meshName.contains("bumper") && !nodeName.contains("bumper")
+
+                // If Model Y Refresh front lights, split into center white lightbar and clear transparent headlights:
+                if isRefreshFrontLightbar {
+                    var lightbarIndices: [UInt32] = []
+                    var headlightIndices: [UInt32] = []
+                    
+                    for t in 0..<(finalIndices.count / 3) {
+                        let idx0 = finalIndices[t * 3]
+                        let idx1 = finalIndices[t * 3 + 1]
+                        let idx2 = finalIndices[t * 3 + 2]
+                        let p0 = worldPositions[Int(idx0)]
+                        let p1 = worldPositions[Int(idx1)]
+                        let p2 = worldPositions[Int(idx2)]
+                        let midX = (p0.x + p1.x + p2.x) / 3.0
+                        if abs(midX) < 0.52 {
+                            // Center horizontal lightbar across the nose: brilliant white LED lightbar!
+                            lightbarIndices.append(idx0)
+                            lightbarIndices.append(idx1)
+                            lightbarIndices.append(idx2)
+                        } else {
+                            // Left & Right headlights: 100% CLEAR TRANSPARENT optical glass lens!
+                            headlightIndices.append(idx0)
+                            headlightIndices.append(idx1)
+                            headlightIndices.append(idx2)
+                        }
+                    }
+                    
+                    if !lightbarIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: lightbarIndices, matCategory: 8)) // White LED Lightbar
+                    }
+                    if !headlightIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: headlightIndices, matCategory: 4)) // Clear Transparent Headlight Glass Lens
+                    }
+                } else if isRefreshDoorOuter {
+                    // Model Y Refresh Doors:
+                    // Triangles with Y > 1.16 are the thin window weatherstrip trim (Category 13 Black).
+                    // Triangles with Y <= 1.16 are the outer door skin, handles, and character lines (Category 1 Factory Body Paint)!
+                    var trimIndices: [UInt32] = []
+                    var paintIndices: [UInt32] = []
+                    
+                    for t in 0..<(finalIndices.count / 3) {
+                        let idx0 = finalIndices[t * 3]
+                        let idx1 = finalIndices[t * 3 + 1]
+                        let idx2 = finalIndices[t * 3 + 2]
+                        let p0 = worldPositions[Int(idx0)]
+                        let p1 = worldPositions[Int(idx1)]
+                        let p2 = worldPositions[Int(idx2)]
+                        let midY = (p0.y + p1.y + p2.y) / 3.0
+                        
+                        if midY > 1.16 {
+                            trimIndices.append(idx0)
+                            trimIndices.append(idx1)
+                            trimIndices.append(idx2)
+                        } else {
+                            paintIndices.append(idx0)
+                            paintIndices.append(idx1)
+                            paintIndices.append(idx2)
+                        }
+                    }
+                    if !trimIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: trimIndices, matCategory: 13))
+                    }
+                    if !paintIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: paintIndices, matCategory: 1))
+                    }
+                } else if isStandardDoorTrim {
+                    // Standard Door Trim Meshes (Model 3, Highland, Model Y):
+                    // Triangles above window sill are beltline trim.
+                    // Triangles in door handle zones are door handles!
+                    // Classic Model 3 has factory Chrome handles & beltline trim (Category 7 Chrome).
+                    // Modern variants (Highland, Model Y) have Satin Black Trim (Category 13 Black).
+                    let trimCat = isClassicModel3 ? 7 : 13
+                    
+                    var trimIndices: [UInt32] = []
+                    var paintIndices: [UInt32] = []
+                    
+                    for t in 0..<(finalIndices.count / 3) {
+                        let idx0 = finalIndices[t * 3]
+                        let idx1 = finalIndices[t * 3 + 1]
+                        let idx2 = finalIndices[t * 3 + 2]
+                        let p0 = worldPositions[Int(idx0)]
+                        let p1 = worldPositions[Int(idx1)]
+                        let p2 = worldPositions[Int(idx2)]
+                        let midX = (p0.x + p1.x + p2.x) / 3.0
+                        let midY = (p0.y + p1.y + p2.y) / 3.0
+                        
+                        let isFrontHandle = (midY >= 0.65 && midY <= (isModelY ? 1.00 : 0.90)) && (midX >= -0.20 && midX <= 0.25)
+                        let isRearHandle = (midY >= 0.65 && midY <= (isModelY ? 1.00 : 0.90)) && (midX >= -1.25 && midX <= -0.65)
+                        let isHandle = isFrontHandle || isRearHandle
+                        let isBeltline = (midY > beltlineThreshold)
+                        
+                        if isBeltline || isHandle {
+                            trimIndices.append(idx0)
+                            trimIndices.append(idx1)
+                            trimIndices.append(idx2)
+                        } else {
+                            paintIndices.append(idx0)
+                            paintIndices.append(idx1)
+                            paintIndices.append(idx2)
+                        }
+                    }
+                    if !trimIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: trimIndices, matCategory: trimCat))
+                    }
+                    if !paintIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: paintIndices, matCategory: 1))
+                    }
+                } else if isPaintMeshForSeparation {
+                    // Wiper separation, window pillars, and window perimeter trim:
+                    // Body panels (outer roof arches, quarter panels, cant rails, doors, fenders) remain 100% factory car body paint!
+                    // Only separate windshield wiper assemblies, door frame pillars (B-pillar, C-pillar quarter glass divider),
+                    // and upper window perimeter trim strip.
+                    var wiperIndices: [UInt32] = []
+                    var pillarIndices: [UInt32] = []
+                    var windowTrimIndices: [UInt32] = []
+                    var bodyIndices: [UInt32] = []
+                    
+                    for t in 0..<(finalIndices.count / 3) {
+                        let idx0 = finalIndices[t * 3]
+                        let idx1 = finalIndices[t * 3 + 1]
+                        let idx2 = finalIndices[t * 3 + 2]
+                        let p0 = worldPositions[Int(idx0)]
+                        let p1 = worldPositions[Int(idx1)]
+                        let p2 = worldPositions[Int(idx2)]
+                        let midX = (p0.x + p1.x + p2.x) / 3.0
+                        let midY = (p0.y + p1.y + p2.y) / 3.0
+                        let midZ = (p0.z + p1.z + p2.z) / 3.0
+                        let n0 = worldNormals[Int(idx0)]
+                        let n1 = worldNormals[Int(idx1)]
+                        let n2 = worldNormals[Int(idx2)]
+                        let avgNy = (n0.y + n1.y + n2.y) / 3.0
+                        let avgNz = (n0.z + n1.z + n2.z) / 3.0
+                        
+                        let isWiper: Bool
+                        let isPillar: Bool
+                        let isWindowTrim: Bool
+                        
+                        if isSemi {
+                            // 1. Semi Windshield Wiper (blade, arm, and pivot on windshield glass surface):
+                            let isBlade = (midX >= 2.65 && midX <= 3.26 && midY >= 1.80 && midY <= 2.60 && midZ >= 0.40 && midZ <= 0.66)
+                            let isArm = (midX >= 3.10 && midX <= 3.38 && midY >= 1.68 && midY <= 2.02 && midZ >= -0.12 && midZ <= 0.52)
+                            isWiper = isBlade || isArm
+                            // 2. Semi Window Pillar (A-pillar between windshield and side door window):
+                            isPillar = (midX >= 2.35 && midX <= 3.26 && midY >= 1.65 && midY <= 2.78 && abs(midZ) >= 0.62 && abs(midZ) <= 0.84)
+                            isWindowTrim = false
+                        } else if url.lastPathComponent.lowercased().contains("bayberry") {
+                            // Model Y Refresh (Z-forward): Wiper arms and blades across cowl
+                            isWiper = (midZ >= -1.40 && midZ <= -0.75 && midY >= 0.82 && midY <= 1.06 && abs(midX) <= 0.75)
+                            isPillar = false
+                            isWindowTrim = false
+                        } else {
+                            // Standard X-forward vehicles (Model 3, Highland, Model Y, Model S, Model X):
+                            // 1. Wiper arms and blades across cowl
+                            let maxZ: Float = matName.contains("paintskybox") ? 0.68 : 0.74
+                            isWiper = (midX >= 1.02 && midX <= 1.45 && midY >= 0.82 && midY <= 1.06 && abs(midZ) <= maxZ)
+                            
+                            let isBodyMesh = meshName.contains("body") || nodeName.contains("body")
+                            
+                            // 2. Side window perimeter trim strip around side windows (Model 3, Model Y, etc.):
+                            // Encompasses the continuous hockey-stick trim around the fixed rear quarter window,
+                            // the upper roof arch over the doors, and continues down the A-pillar to the front mirror base.
+                            // Trim strictly faces outward towards vehicle sides: abs(avgNz) >= 0.75.
+                            // Windshield header/gutter has abs(avgNz) < 0.70 or avgNy < -0.50, and cant rail / C-pillar paint has avgNy >= 0.52.
+                            let isSideTrim = isBodyMesh && (midX >= -1.62 && midX <= 0.79 &&
+                                                           midY >= 1.02 && midY <= (isModelY ? 1.62 : 1.45) &&
+                                                           abs(midZ) >= 0.60 && abs(midZ) <= 0.82 &&
+                                                           abs(avgNz) >= 0.75 &&
+                                                           avgNy <= 0.485 && avgNy >= -0.50)
+                            isWindowTrim = isSideTrim
+                            
+                            // 3. Window Pillars on Body Mesh:
+                            // B-pillar vertical divider between front and rear windows (below the upper window trim)
+                            // C-pillar divider between rear window and quarter glass
+                            let isBPillar = isBodyMesh && (midX >= -0.34 && midX <= -0.16 && midY >= 0.95 && midY <= 1.33 && abs(midZ) >= 0.65 && abs(midZ) <= 0.82)
+                            let isCPillar = isBodyMesh && (midX >= -1.25 && midX <= -1.05 && midY >= 0.95 && midY <= 1.25 && abs(midZ) >= 0.65 && abs(midZ) <= 0.82)
+                            isPillar = (isBPillar || isCPillar) && !isWindowTrim
+                        }
+                        
+                        if isWiper {
+                            wiperIndices.append(idx0)
+                            wiperIndices.append(idx1)
+                            wiperIndices.append(idx2)
+                        } else if isWindowTrim {
+                            windowTrimIndices.append(idx0)
+                            windowTrimIndices.append(idx1)
+                            windowTrimIndices.append(idx2)
+                        } else if isPillar {
+                            pillarIndices.append(idx0)
+                            pillarIndices.append(idx1)
+                            pillarIndices.append(idx2)
+                        } else {
+                            bodyIndices.append(idx0)
+                            bodyIndices.append(idx1)
+                            bodyIndices.append(idx2)
+                        }
+                    }
+                    
+                    if !wiperIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: wiperIndices, matCategory: 13)) // Windshield Wiper: Satin Black Trim
+                    }
+                    if !pillarIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: pillarIndices, matCategory: 13)) // Window Pillar: Satin Black Trim
+                    }
+                    if !windowTrimIndices.isEmpty {
+                        // Upper window perimeter trim: Category 7 Chrome for classic Model 3, Category 13 Satin Black for others!
+                        let trimCat = isClassicModel3 ? 7 : 13
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: windowTrimIndices, matCategory: trimCat))
+                    }
+                    if !bodyIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: bodyIndices, matCategory: cat)) // Car Body Paint: 100% Factory Paint!
+                    }
+                } else if (cat == 7 || cat == 8) && (meshName.contains("light") || matName.contains("light")) {
+                    // Combined light mesh spanning both front and rear (e.g. Model Y lights or Cybertruck Lights2)
+                    var frontIndices: [UInt32] = []
+                    var rearIndices: [UInt32] = []
+                    
+                    for t in 0..<(finalIndices.count / 3) {
+                        let idx0 = finalIndices[t * 3]
+                        let idx1 = finalIndices[t * 3 + 1]
+                        let idx2 = finalIndices[t * 3 + 2]
+                        let p0 = worldPositions[Int(idx0)]
+                        let p1 = worldPositions[Int(idx1)]
+                        let p2 = worldPositions[Int(idx2)]
+                        let midX = (p0.x + p1.x + p2.x) / 3.0
+                        if midX < -0.2 {
+                            rearIndices.append(idx0)
+                            rearIndices.append(idx1)
+                            rearIndices.append(idx2)
+                        } else {
+                            frontIndices.append(idx0)
+                            frontIndices.append(idx1)
+                            frontIndices.append(idx2)
+                        }
+                    }
+                    
+                    if !frontIndices.isEmpty && !rearIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: frontIndices, matCategory: cat))
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: rearIndices, matCategory: 9))
+                    } else if !rearIndices.isEmpty {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: rearIndices, matCategory: 9))
+                    } else {
+                        rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: frontIndices, matCategory: cat))
+                    }
+                } else {
+                    rawPrims.append(RawPrimitive(positions: worldPositions, normals: worldNormals, indices: finalIndices, matCategory: cat))
+                }
             }
         }
         
@@ -331,19 +714,19 @@ public class GLBLoader {
         geomBuckets[1].roughness = 0.12
         geomBuckets[1].clearcoat = 1.0
         
-        // 2: Windows & Windshield Glass (Transparent ray-traced transmission)
-        geomBuckets[2].baseColor = SIMD3<Float>(0.88, 0.92, 0.96)
-        geomBuckets[2].metallic = 0.02
-        geomBuckets[2].roughness = 0.02
+        // 2: Windows & Windshield Glass (100% transparent crystal-clear ray-traced transmission)
+        geomBuckets[2].baseColor = SIMD3<Float>(0.92, 0.95, 0.98)
+        geomBuckets[2].metallic = 0.01
+        geomBuckets[2].roughness = 0.01
         geomBuckets[2].clearcoat = 1.0
-        geomBuckets[2].transmission = 0.88
+        geomBuckets[2].transmission = 0.92
         
         // 3: Tinted Glass Roof & Rear Privacy Windows (Factory privacy transmission)
-        geomBuckets[3].baseColor = SIMD3<Float>(0.22, 0.25, 0.30)
-        geomBuckets[3].metallic = 0.04
-        geomBuckets[3].roughness = 0.02
+        geomBuckets[3].baseColor = SIMD3<Float>(0.07, 0.08, 0.10) // Deep factory privacy glass charcoal
+        geomBuckets[3].metallic = 0.05
+        geomBuckets[3].roughness = 0.01 // Mirror smooth optical glass
         geomBuckets[3].clearcoat = 1.0
-        geomBuckets[3].transmission = 0.40
+        geomBuckets[3].transmission = 0.18 // Deep factory privacy tint!
         
         // 4: Clear Headlight Glass Lens (Crystal clear high transmission)
         geomBuckets[4].baseColor = SIMD3<Float>(0.98, 0.99, 1.0)
@@ -370,19 +753,20 @@ public class GLBLoader {
         geomBuckets[7].roughness = 0.04
         geomBuckets[7].clearcoat = 1.0
         
-        // 8: Headlight White LEDs
-        geomBuckets[8].baseColor = SIMD3<Float>(1.0, 0.98, 0.95)
-        geomBuckets[8].metallic = 0.05
-        geomBuckets[8].roughness = 0.08
-        geomBuckets[8].emissive = 3.5
+        // 8: Headlight White LEDs & Front Lightbars (Luminous optical white with transparency)
+        geomBuckets[8].baseColor = SIMD3<Float>(0.98, 0.99, 1.0) // Brilliant white
+        geomBuckets[8].metallic = 0.02
+        geomBuckets[8].roughness = 0.02
+        geomBuckets[8].emissive = 3.5 // Glowing white lightbar!
         geomBuckets[8].clearcoat = 1.0
+        geomBuckets[8].transmission = 0.65 // Transparent optical lightbar glass!
         
-        // 9: Taillight Red LEDs
-        geomBuckets[9].baseColor = SIMD3<Float>(1.0, 0.06, 0.02)
+        // 9: Taillight & Brake Light Ruby Red Reflector & Charge Port Reflector (No flat emissive blow-out!)
+        geomBuckets[9].baseColor = SIMD3<Float>(0.76, 0.025, 0.035) // Deep rich automotive ruby red
         geomBuckets[9].metallic = 0.05
-        geomBuckets[9].roughness = 0.08
-        geomBuckets[9].emissive = 3.0
-        geomBuckets[9].clearcoat = 1.0
+        geomBuckets[9].roughness = 0.05 // High optical gloss
+        geomBuckets[9].emissive = 0.0 // ZERO emissive blow-out! Preserves 100% surface texture, normals, and specular highlights!
+        geomBuckets[9].clearcoat = 1.0 // Glossy automotive clearcoat
         
         // 10: Center Touchscreen / Displays
         geomBuckets[10].baseColor = SIMD3<Float>(0.30, 0.42, 0.60)
@@ -403,11 +787,11 @@ public class GLBLoader {
         geomBuckets[12].roughness = 0.35
         geomBuckets[12].clearcoat = 0.0
         
-        // 13: Exterior Trim & Chassis
-        geomBuckets[13].baseColor = SIMD3<Float>(0.08, 0.09, 0.10)
-        geomBuckets[13].metallic = 0.15
-        geomBuckets[13].roughness = 0.65
-        geomBuckets[13].clearcoat = 0.0
+        // 13: Exterior Trim & Chassis & Underbody
+        geomBuckets[13].baseColor = SIMD3<Float>(0.025, 0.027, 0.030) // Deep automotive underbody & trim black
+        geomBuckets[13].metallic = 0.08
+        geomBuckets[13].roughness = 0.55 // Satin/matte underbody & chassis texture
+        geomBuckets[13].clearcoat = 0.0  // Matte underbody, no glossy clearcoat
         
         // Center the vehicle: center in X/Z, align bottom of wheels to ground y = 0.001
         for prim in rawPrims {

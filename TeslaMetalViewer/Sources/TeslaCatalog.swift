@@ -196,14 +196,35 @@ public struct TeslaCatalog {
     
     public static func resolveModelPath(filename: String) -> URL? {
         let fileManager = FileManager.default
+        
+        // 1. Bundle Resources (self-contained inside .app, zero privacy permissions requested)
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundleModel = resourceURL.appendingPathComponent("models/\(filename)")
+            if fileManager.fileExists(atPath: bundleModel.path) {
+                return bundleModel
+            }
+            let directBundle = resourceURL.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: directBundle.path) {
+                return directBundle
+            }
+        }
+        
+        // 2. Relative to executable binary location inside .app/Contents/MacOS
+        let execURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let execDir = execURL.deletingLastPathComponent()
+        let bundleResFromExec = execDir.deletingLastPathComponent().appendingPathComponent("Resources/models/\(filename)")
+        if fileManager.fileExists(atPath: bundleResFromExec.path) {
+            return bundleResFromExec
+        }
+        
+        // 3. Current working directory & relative paths (for command-line development)
         let currentDir = fileManager.currentDirectoryPath
         let candidates = [
             "models/\(filename)",
             "../models/\(filename)",
             "../../models/\(filename)",
             "\(currentDir)/models/\(filename)",
-            "\(currentDir)/../models/\(filename)",
-            "/Users/m4air/Documents/github/android_apk/tesla-3d-viewer/models/\(filename)"
+            "\(currentDir)/../models/\(filename)"
         ]
         for candidate in candidates {
             if fileManager.fileExists(atPath: candidate) {

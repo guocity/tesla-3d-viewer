@@ -18,11 +18,13 @@ mkdir -p "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/TeslaMetalViewer" "$APP_DIR/Contents/MacOS/TeslaMetalViewer"
 chmod +x "$APP_DIR/Contents/MacOS/TeslaMetalViewer"
 
-# Copy models folder or create symlink so the app bundle contains all models
+# Copy models folder directly into Resources so the app bundle is completely
+# self-contained and never triggers macOS TCC privacy prompts for Documents
+rm -rf "$APP_DIR/Contents/Resources/models"
 if [ -d "$SCRIPT_DIR/../models" ]; then
-    ln -sfn "$SCRIPT_DIR/../models" "$APP_DIR/Contents/Resources/models"
+    cp -R "$SCRIPT_DIR/../models" "$APP_DIR/Contents/Resources/models"
 elif [ -d "$SCRIPT_DIR/models" ]; then
-    ln -sfn "$SCRIPT_DIR/models" "$APP_DIR/Contents/Resources/models"
+    cp -R "$SCRIPT_DIR/models" "$APP_DIR/Contents/Resources/models"
 fi
 
 cat << 'EOF' > "$APP_DIR/Contents/Info.plist"

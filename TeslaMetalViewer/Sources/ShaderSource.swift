@@ -174,9 +174,25 @@ public struct ShaderSource {
 
                 if (carHit.type == intersection_type::triangle) {
                     GeometryInfo carMat = geometries[carHit.geometry_id];
-                    float3 carBase = (carMat.isPaint == 1)
-                        ? uniforms.carPaintColor.xyz
-                        : carMat.baseColor.xyz;
+                    uint ci0 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 0];
+                    uint ci1 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 1];
+                    uint ci2 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 2];
+                    float2 cb = carHit.triangle_barycentric_coord;
+                    float cw = 1.0 - cb.x - cb.y;
+                    float3 cn = normalize(cw * vertices[ci0].normal.xyz + cb.x * vertices[ci1].normal.xyz + cb.y * vertices[ci2].normal.xyz);
+                    float3 cHitPos = reflRay.origin + reflRay.direction * carHit.distance;
+
+                    float3 carBase;
+                    if (carMat.isPaint == 1) {
+                        // Ground reflection: only the flat downward battery pan facing ground is dark underbody
+                        if (cn.y < -0.85 && cHitPos.y < 0.20 && abs(cHitPos.z) < 0.65) {
+                            carBase = float3(0.025, 0.027, 0.030);
+                        } else {
+                            carBase = uniforms.carPaintColor.xyz;
+                        }
+                    } else {
+                        carBase = carMat.baseColor.xyz;
+                    }
                     
                     reflectedColor = carBase * 0.90;
                 }
@@ -194,19 +210,30 @@ public struct ShaderSource {
                 float transmission = mat.params.w;
                 float3 glassTint = mat.baseColor.xyz;
                 
-                // If tinted glass roof or rear privacy windows:
-                if (mat.baseColor.x < 0.5 && mat.params.w < 0.70) {
+                // If tinted glass roof or rear privacy windows (Cat 3):
+                if (mat.baseColor.x < 0.50 && mat.params.w < 0.60) {
                     if (uniforms.tintParams.x > 0.5) {
-                        // Privacy Glass Enabled (Factory option for Model Y, Model X, etc.):
+                        // Deep factory privacy tint option enabled:
                         transmission = uniforms.tintParams.y;
                         float darkness = uniforms.tintParams.z;
-                        glassTint = mix(float3(0.25, 0.28, 0.34), float3(0.06, 0.07, 0.09), darkness);
+                        glassTint = mix(float3(0.14, 0.16, 0.20), float3(0.025, 0.030, 0.038), darkness);
                     } else {
-                        // Privacy Glass Disabled (Clear glass option):
-                        transmission = 0.86;
-                        glassTint = float3(0.85, 0.90, 0.95);
+                        // Privacy tint OFF: All rear windows & glass roof become 100% clear transparent glass!
+                        transmission = 0.92;
+                        glassTint = float3(0.92, 0.95, 0.98);
                     }
                 }
+                
+                // ============================================================
+                // WINDSHIELD PERIMETER FRAME (SUBTLE THIN FRIT BORDER)
+                // ============================================================
+                // Never use thick opaque overlays across the glass viewing area!
+                // Model X has a giant panoramic windshield - no blocker allowed.
+                // Cybertruck windshield must be fully transparent - no blocker allowed.
+                // Any perimeter frit border must be strictly a thin edge border, never an opaque blocker.
+                bool isWindshieldFrame = false;
+                // Exclude Model X (windshield extends to X < 0.15) and Cybertruck (hitPos.x ~ 1.12 to 2.05) from opaque blocking
+                // We keep windshield glass crystal clear. No blocker overlay on glass!
                 
                 float3 viewDir = -rayDir;
                 float NdotV = max(dot(normal, viewDir), 0.0);
@@ -290,7 +317,7 @@ public struct ShaderSource {
                 
                 // If transmission < 1.0, blend between opaque surface and transmitted glass
                 float3 opaqueLook = glassTint * 0.1 + reflColor * fresnel;
-                color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec);
+                color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec) + float3(mat.params.z);
             } else {
                 // ============================================================
                 // METALLIC CAR BODY & TESLA DETAILS
@@ -300,6 +327,7 @@ public struct ShaderSource {
                 float roughness = (mat.isPaint == 1) ? uniforms.params.x : mat.params.x;
                 float clearcoat = (mat.isPaint == 1) ? uniforms.params.y : mat.params.y;
                 float emissive = mat.params.z;
+
 
                 float3 viewDir = -rayDir;
                 float3 halfDir = normalize(lightDir + viewDir);

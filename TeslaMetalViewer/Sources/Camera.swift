@@ -77,22 +77,22 @@ public class Camera {
         switch preset {
         case .hero:
             azimuth = 0.65
-            elevation = 0.32
+            elevation = 0.30
             distance = r * 2.2
         case .side:
-            azimuth = Float.pi * 0.5
-            elevation = 0.18
+            azimuth = 0.0
+            elevation = 0.16
             distance = r * 2.1
         case .front:
-            azimuth = 0.0
-            elevation = 0.20
+            azimuth = Float.pi * 0.5
+            elevation = 0.18
             distance = r * 2.0
         case .rear:
-            azimuth = Float.pi
-            elevation = 0.25
+            azimuth = -Float.pi * 0.68
+            elevation = 0.22
             distance = r * 2.1
         case .top:
-            azimuth = 0.4
+            azimuth = 0.65
             elevation = Float.pi * 0.46
             distance = r * 2.5
         }
@@ -101,12 +101,12 @@ public class Camera {
     public var tourTime: Float = 0.0
     
     public static let tourWaypoints: [TourKeyframe] = [
-        TourKeyframe(name: "Hero 3/4 Overview", azimuth: 0.65, elevation: 0.32, distanceFactor: 2.20, targetOffsetY: 0.85, duration: 4.0),
-        TourKeyframe(name: "Front Fascia & Lights", azimuth: 0.10, elevation: 0.16, distanceFactor: 1.55, targetOffsetY: 0.60, duration: 4.5),
-        TourKeyframe(name: "Aero Profile & Wheels", azimuth: 1.55, elevation: 0.14, distanceFactor: 1.80, targetOffsetY: 0.50, duration: 4.5),
-        TourKeyframe(name: "Rear 3/4 & Tail Lightbar", azimuth: 2.70, elevation: 0.24, distanceFactor: 1.85, targetOffsetY: 0.75, duration: 4.5),
-        TourKeyframe(name: "Top Panoramic Roof", azimuth: 0.90, elevation: 1.25, distanceFactor: 2.30, targetOffsetY: 0.70, duration: 4.5),
-        TourKeyframe(name: "Studio 360° Orbit", azimuth: 0.65 + Float.pi * 2, elevation: 0.32, distanceFactor: 2.20, targetOffsetY: 0.85, duration: 5.5)
+        TourKeyframe(name: "Hero 3/4 Overview", azimuth: 0.65, elevation: 0.30, distanceFactor: 2.20, targetOffsetY: 0.85, duration: 4.0),
+        TourKeyframe(name: "Front Fascia & Lights", azimuth: Float.pi * 0.5, elevation: 0.15, distanceFactor: 1.65, targetOffsetY: 0.60, duration: 4.5),
+        TourKeyframe(name: "Aero Profile & Wheels", azimuth: 0.0, elevation: 0.14, distanceFactor: 1.85, targetOffsetY: 0.50, duration: 4.5),
+        TourKeyframe(name: "Rear 3/4 & Charge Port", azimuth: -Float.pi * 0.68, elevation: 0.22, distanceFactor: 1.85, targetOffsetY: 0.75, duration: 4.5),
+        TourKeyframe(name: "Top Panoramic Roof", azimuth: 0.65, elevation: 1.25, distanceFactor: 2.30, targetOffsetY: 0.70, duration: 4.5),
+        TourKeyframe(name: "Studio 360° Orbit", azimuth: 0.65 + Float.pi * 2, elevation: 0.30, distanceFactor: 2.20, targetOffsetY: 0.85, duration: 5.5)
     ]
     
     public func updateTour(deltaTime: Float, radius: Float, center: SIMD3<Float>) -> (progress: Float, stage: String) {

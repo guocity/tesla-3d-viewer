@@ -45,6 +45,7 @@ public class RayTracer {
     public let maxSamples: UInt32 = 256
     public var isDirty: Bool = true
     private var geometryCount: Int = 0
+    private var lastTintParams: SIMD4<Float> = .zero
     
     public init(device: MTLDevice) {
         self.device = device
@@ -253,6 +254,11 @@ public class RayTracer {
             privacyTintDarkness,
             0.0
         )
+        if uniforms.tintParams != lastTintParams {
+            lastTintParams = uniforms.tintParams
+            sampleIndex = 0
+            uniforms.viewport.z = 0
+        }
         
         let ub = device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformsGPU>.stride, options: .storageModeShared)!
         self.uniformsBuffer = ub
@@ -312,5 +318,116 @@ public class RayTracer {
         if !isInteracting && sampleIndex < maxSamples {
             sampleIndex += 1
         }
+    }
+    
+    public func renderToImage(
+        width: Int,
+        height: Int,
+        samples: Int,
+        camera: Camera,
+        paintColor: SIMD3<Float>,
+        metallic: Float,
+        roughness: Float,
+        clearcoat: Float,
+        groundReflectivity: Float,
+        groundRoughness: Float,
+        isPrivacyTint: Bool,
+        privacyTintDarkness: Float
+    ) -> CGImage? {
+        guard let accel = accelerationStructure,
+              let vb = vertexBuffer,
+              let ib = indexBuffer,
+              let gb = geometryBuffer else { return nil }
+        
+        let w = width
+        let h = height
+        updateTextures(width: w, height: h, pixelFormat: .rgba8Unorm)
+        
+        let aspect = Float(w) / Float(h)
+        let viewMat = camera.viewMatrix()
+        let projMat = camera.projectionMatrix(aspect: aspect)
+        let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
+        
+        var uniforms = UniformsGPU()
+        uniforms.invView = viewMat.inverse
+        uniforms.invProj = projMat.inverse
+        uniforms.cameraPos = SIMD4<Float>(camera.position.x, camera.position.y, camera.position.z, 1.0)
+        uniforms.carPaintColor = SIMD4<Float>(paintColor.x, paintColor.y, paintColor.z, metallic)
+        uniforms.materialParams = SIMD4<Float>(roughness, clearcoat, groundReflectivity, groundRoughness)
+        uniforms.tintParams = SIMD4<Float>(isPrivacyTint ? 1.0 : 0.0, tintTrans, privacyTintDarkness, 0.0)
+        
+        if geometryCount > 0 {
+            let ptr = gb.contents().bindMemory(to: GeometryInfoGPU.self, capacity: geometryCount)
+            for i in 0..<geometryCount {
+                if ptr[i].isPaint == 1 {
+                    ptr[i].baseColor = SIMD4<Float>(paintColor.x, paintColor.y, paintColor.z, metallic)
+                    ptr[i].params.x = roughness
+                    ptr[i].params.y = clearcoat
+                }
+            }
+        }
+        
+        for s in 0..<samples {
+            uniforms.viewport = SIMD4<UInt32>(UInt32(w), UInt32(h), UInt32(s), s > 0 ? 1 : 0)
+            guard let ub = device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformsGPU>.stride, options: .storageModeShared),
+                  let cmd = commandQueue.makeCommandBuffer(),
+                  let enc = cmd.makeComputeCommandEncoder() else { continue }
+            
+            enc.setComputePipelineState(pipelineState)
+            enc.setAccelerationStructure(accel, bufferIndex: 0)
+            enc.setBuffer(vb, offset: 0, index: 1)
+            enc.setBuffer(ib, offset: 0, index: 2)
+            enc.setBuffer(gb, offset: 0, index: 3)
+            enc.setBuffer(ub, offset: 0, index: 4)
+            enc.setTexture(accumTexture, index: 0)
+            enc.setTexture(outputTexture, index: 1)
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadGroups = MTLSize(
+                width: (w + threadsPerGroup.width - 1) / threadsPerGroup.width,
+                height: (h + threadsPerGroup.height - 1) / threadsPerGroup.height,
+                depth: 1
+            )
+            enc.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadsPerGroup)
+            enc.endEncoding()
+            cmd.commit()
+            cmd.waitUntilCompleted()
+        }
+        
+        let bytesPerRow = w * 4
+        let totalBytes = bytesPerRow * h
+        var rawBytes = [UInt8](repeating: 0, count: totalBytes)
+        
+        let readDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false)
+        readDesc.storageMode = .shared
+        guard let readTex = device.makeTexture(descriptor: readDesc),
+              let cmd = commandQueue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder() else { return nil }
+        
+        blit.copy(from: outputTexture!, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: MTLSize(width: w, height: h, depth: 1), to: readTex, destinationSlice: 0, destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        
+        readTex.getBytes(&rawBytes, bytesPerRow: bytesPerRow, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(rawBytes) as CFData),
+              let cgImage = CGImage(
+                width: w,
+                height: h,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo,
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else { return nil }
+        
+        return cgImage
     }
 }

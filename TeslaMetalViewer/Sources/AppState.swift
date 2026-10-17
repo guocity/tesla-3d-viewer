@@ -43,7 +43,7 @@ public class AppState: ObservableObject {
     }
     
     // Privacy Glass & Panoramic Roof Tint controls
-    @Published public var isPrivacyTintEnabled: Bool = true {
+    @Published public var isPrivacyTintEnabled: Bool = false {
         didSet { onMaterialChanged?() }
     }
     @Published public var privacyTintDarkness: Float = 0.75 {
@@ -52,6 +52,7 @@ public class AppState: ObservableObject {
     
     // Viewport Navigation Mode (Orbit / Rotate vs Pan / Move)
     @Published public var navMode: NavigationMode = .orbit
+    public var initialPreset: CameraPreset? = nil
     
     // Cinematic Showcase Car Tour
     @Published public var isTouring: Bool = false {

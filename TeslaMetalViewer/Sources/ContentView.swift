@@ -30,13 +30,27 @@ public struct ContentView: View {
                                 .cornerRadius(4)
                                 .foregroundColor(.white)
                             
-                            Text("APPLE SILICON HARDWARE RT")
-                                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.12))
+                            Button(action: {
+                                switchToNextModel()
+                            }) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "forward.fill")
+                                        .font(.system(size: 8, weight: .bold))
+                                    Text("NEXT MODEL ❯")
+                                        .font(.system(size: 9, weight: .black, design: .rounded))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.blue.opacity(0.85))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                                )
                                 .cornerRadius(4)
-                                .foregroundColor(.white.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Click to show the next Tesla vehicle model")
                         }
                         
                         // Direct Dropdown Selector for All 12 Tesla Models
@@ -633,6 +647,74 @@ public struct ContentView: View {
                                     sliderRow(title: "Tint Darkness", value: $state.privacyTintDarkness, range: 0.10...0.95)
                                 }
                             }
+                            
+                            Divider().background(Color.white.opacity(0.2))
+                            
+                            // Section 5: Apple Silicon Hardware Ray Tracing Diagnostics & Status
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "cpu.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.green)
+                                    Text("APPLE SILICON HARDWARE RT")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.85))
+                                    Spacer()
+                                    Text("ENABLED")
+                                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.green)
+                                        .foregroundColor(.black)
+                                        .cornerRadius(3)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text("RT Engine:")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Spacer()
+                                        Text("Metal 3 Intersector")
+                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .foregroundColor(.white)
+                                    }
+                                    HStack {
+                                        Text("Acceleration:")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Spacer()
+                                        Text("MTLAccelerationStructure")
+                                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.85))
+                                    }
+                                    HStack {
+                                        Text("Hardware Cores:")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Spacer()
+                                        Text("RT Cores Active")
+                                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                            .foregroundColor(.green)
+                                    }
+                                    HStack {
+                                        Text("Triangles Traversed:")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        Spacer()
+                                        Text("\(state.totalTriangles.formatted()) tris")
+                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .padding(8)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(6)
+                                
+                                Text("Hardware Ray Tracing runs automatically on Apple Silicon GPU RT cores for primary, transmission, and ground reflection rays.")
+                                    .font(.system(size: 8))
+                                    .foregroundColor(.white.opacity(0.50))
+                            }
                         }
                         .padding(16)
                     }
@@ -730,6 +812,15 @@ public struct ContentView: View {
         }
     }
     
+    private func switchToNextModel() {
+        let allModels = TeslaCatalog.models
+        let currentIndex = allModels.firstIndex(where: { $0.id == state.selectedModel.id }) ?? 0
+        let nextIndex = (currentIndex + 1) % allModels.count
+        let nextModel = allModels[nextIndex]
+        state.selectModel(nextModel)
+        switchModel(nextModel)
+    }
+    
     private func switchModel(_ model: TeslaCarModel) {
         let success = rayTracer.loadModel(filename: model.filename)
         if success {
@@ -737,7 +828,9 @@ public struct ContentView: View {
             state.totalVertices = rayTracer.currentScene?.totalVertices ?? 0
             let radius = rayTracer.currentScene?.radius ?? 3.0
             let center = rayTracer.currentScene?.center ?? SIMD3<Float>(0, 0.7, 0)
-            state.camera.applyPreset(.hero, radius: radius, center: center)
+            let preset = state.initialPreset ?? .hero
+            state.camera.applyPreset(preset, radius: radius, center: center)
+            state.initialPreset = nil
             rayTracer.resetAccumulation()
         }
     }
