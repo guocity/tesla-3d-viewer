@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TESLA 3D STUDIO — Extracted APK Asset Viewer & Path Tracer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Import Map for Three.js r164 + GPU Path Tracer + BVH (100% local vendor for instant load) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js",
+      "three/addons/": "./vendor/addons/",
+      "three/examples/jsm/": "./vendor/addons/",
+      "three-mesh-bvh": "./vendor/three-mesh-bvh.js",
+      "three-gpu-pathtracer": "./vendor/three-gpu-pathtracer.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app-shell">
+    <!-- TOP HEADER BAR -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="tesla-mark" viewBox="0 0 342 35" fill="currentColor" aria-label="Tesla">
+          <path d="M0 .1a9.7 9.7 0 0 0 7 7h11l.5.1v27.6h6.8V7.3L26 7h11a9.8 9.8 0 0 0 7-7H0zm238.6 0h-6.8v34.8H263a9.7 9.7 0 0 0 6-6.8h-30.3V0zm-52.3 6.8c3.6-1 6.6-3.8 7.4-6.9l-38.1.1v20.6h31.1v7.2h-24.4a13.6 13.6 0 0 0-8.7 7h39.9v-21h-31.2v-7h24zm116.2 28h6.7v-14h24.6v14h6.7v-21h-38zM85.3 7h26a9.6 9.6 0 0 0 7.1-7H78.3a9.6 9.6 0 0 0 7 7zm0 13.8h26a9.6 9.6 0 0 0 7.1-7H78.3a9.6 9.6 0 0 0 7 7zm0 14.1h26a9.6 9.6 0 0 0 7.1-7H78.3a9.6 9.6 0 0 0 7 7zM308.5 7h26a9.6 9.6 0 0 0 7-7h-40a9.6 9.6 0 0 0 7 7z"/>
+        </svg>
+        <div class="brand-divider"></div>
+        <div class="brand-meta">
+          <span class="brand-title">3D ASSET STUDIO &amp; PATH TRACER</span>
+          <span class="brand-sub">Extracted via REA from Tesla Android v4.61.6-4647 (Godot 3.2 RSRC &rarr; glTF 2.0)</span>
+        </div>
+      </div>
+
+      <!-- RENDER MODE SWITCHER -->
+      <div class="render-mode-group">
+        <button id="btn-mode-realtime" class="mode-pill active" title="60 FPS Real-Time Physically Based Rendering with Bloom & Dynamic Reflections">
+          <span class="status-dot realtime-dot"></span>
+          Real-Time PBR
+        </button>
+        <button id="btn-mode-pathtrace" class="mode-pill" title="Progressive Monte-Carlo Ray / Path Tracing with Global Illumination, Soft Shadows & Optical DOF">
+          <span class="status-dot pt-dot"></span>
+          GPU Path Tracing
+        </button>
+      </div>
+
+      <!-- RIGHT TOP ACTIONS -->
+      <div class="topbar-actions">
+        <div class="stat-chip" id="poly-counter">0 verts • 0 tris</div>
+        <button id="btn-inspect-nodes" class="icon-btn" title="Inspect Scene Graph & Meshes">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>Scene Tree</span>
+        </button>
+        <button id="btn-screenshot" class="icon-btn" title="Capture Studio Render PNG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span>Capture PNG</span>
+        </button>
+        <a id="btn-download-glb" class="icon-btn primary-btn" href="#" download title="Download current model as standard glTF 2.0 (.glb)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>Download .GLB</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- MAIN WORKSPACE -->
+    <div class="workspace">
+      <!-- LEFT SIDEBAR: ASSET CATALOG -->
+      <aside class="sidebar left-sidebar">
+        <div class="sidebar-header">
+          <div class="category-tabs" id="catalog-tabs">
+            <button class="tab-btn active" data-tab="vehicles">Vehicles <span class="tab-count" id="count-vehicles">12</span></button>
+            <button class="tab-btn" data-tab="wheels">Wheels <span class="tab-count" id="count-wheels">14</span></button>
+            <button class="tab-btn" data-tab="energy_and_accessories">Energy &amp; Gear <span class="tab-count" id="count-energy">9</span></button>
+          </div>
+          <div class="search-box">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="asset-search" placeholder="Search 35 extracted 3D models..." />
+          </div>
+        </div>
+        <div class="asset-list" id="asset-list"></div>
+      </aside>
+
+      <!-- CENTER VIEWPORT -->
+      <main class="viewport-container" id="viewport-container">
+        <canvas id="webgl-canvas"></canvas>
+
+        <!-- LOADING OVERLAY -->
+        <div id="loading-overlay" class="loading-overlay">
+          <div class="spinner"></div>
+          <div class="loading-title" id="loading-title">Loading 3D Asset...</div>
+          <div class="loading-sub" id="loading-sub">Decoding glTF 2.0 meshes &amp; building BVH acceleration tree</div>
+        </div>
+
+        <!-- PATH TRACER ACCUMULATION HUD -->
+        <div id="pt-hud" class="pt-hud hidden">
+          <div class="pt-hud-top">
+            <span class="pt-badge">PATH TRACER ACTIVE</span>
+            <span id="pt-samples-text" class="pt-samples">0 / 512 samples</span>
+          </div>
+          <div class="pt-progress-track">
+            <div id="pt-progress-bar" class="pt-progress-bar"></div>
+          </div>
+          <div class="pt-hud-sub" id="pt-engine-label">Monte-Carlo Ray Accumulation • Physical Glass &amp; GI</div>
+        </div>
+
+        <!-- TOP-LEFT VEHICLE TELEMETRY OVERLAY -->
+        <div class="hud-hero" id="hud-hero">
+          <div class="hud-badge" id="hud-badge">CYBERBEAST</div>
+          <h1 class="hud-title" id="hud-title">Cybertruck Cyberbeast</h1>
+          <p class="hud-subtitle" id="hud-subtitle">Tri-Motor AWD • Stainless Steel Exoskeleton</p>
+          <div class="hud-specs" id="hud-specs">
+            <div class="spec-item"><span class="spec-val" id="spec-range">320 mi</span><span class="spec-lbl">Range (Est.)</span></div>
+            <div class="spec-item"><span class="spec-val" id="spec-accel">2.6 s</span><span class="spec-lbl">0–60 mph</span></div>
+            <div class="spec-item"><span class="spec-val" id="spec-speed">130 mph</span><span class="spec-lbl">Top Speed</span></div>
+            <div class="spec-item"><span class="spec-val" id="spec-power">845 hp</span><span class="spec-lbl">Peak Power</span></div>
+          </div>
+        </div>
+
+        <!-- BOTTOM CAMERA PRESET DOCK -->
+        <div class="camera-dock">
+          <button class="cam-btn active" data-cam="hero">3/4 Hero</button>
+          <button class="cam-btn" data-cam="side">Side Profile</button>
+          <button class="cam-btn" data-cam="rear">Rear 3/4</button>
+          <button class="cam-btn" data-cam="front">Front Fascia</button>
+          <button class="cam-btn" data-cam="wheel">Wheel Macro</button>
+          <button class="cam-btn" data-cam="interior">Cockpit</button>
+          <button class="cam-btn" data-cam="top">Top Aero</button>
+          <div class="dock-sep"></div>
+          <button class="cam-btn toggle-btn" id="btn-turntable" title="Cinematic Turntable Orbit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+            <span>Orbit</span>
+          </button>
+          <button class="cam-btn toggle-btn" id="btn-spin-wheels" title="Spin Wheels & Brake Rotors">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="22"/><line x1="2" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="22" y2="12"/></svg>
+            <span>Spin Wheels</span>
+          </button>
+          <button class="cam-btn toggle-btn" id="btn-wireframe" title="Toggle Mesh Wireframe Overlay">
+            <span>Wireframe</span>
+          </button>
+        </div>
+      </main>
+
+      <!-- RIGHT SIDEBAR: STUDIO & VEHICLE CUSTOMIZER -->
+      <aside class="sidebar right-sidebar">
+        <!-- SECTION 1: EXTERIOR PAINT & FINISH -->
+        <section class="control-section" id="sec-paint">
+          <div class="section-title-row">
+            <h3>Exterior Paint &amp; Finish</h3>
+            <span class="section-value" id="paint-name-label">Ultra Red</span>
+          </div>
+          <div class="swatch-grid" id="paint-swatches"></div>
+          <div class="slider-row">
+            <label>Clearcoat Gloss</label>
+            <input type="range" id="slider-clearcoat" min="0" max="1" step="0.02" value="1.0" />
+          </div>
+          <div class="slider-row">
+            <label>Paint Roughness</label>
+            <input type="range" id="slider-roughness" min="0.02" max="0.65" step="0.01" value="0.12" />
+          </div>
+          <div class="slider-row">
+            <label>Metallic Flake</label>
+            <input type="range" id="slider-metallic" min="0" max="1" step="0.02" value="0.72" />
+          </div>
+        </section>
+
+        <!-- SECTION 2: ARTICULATION / DOORS & CLOSURES -->
+        <section class="control-section" id="sec-articulation">
+          <div class="section-title-row">
+            <h3>Interactive Closures &amp; Doors</h3>
+            <button class="mini-action-btn" id="btn-toggle-all-doors">Open All</button>
+          </div>
+          <div class="door-grid" id="door-buttons">
+            <button class="door-btn" data-part="frunk">Frunk / Hood</button>
+            <button class="door-btn" data-part="trunk">Rear Trunk</button>
+            <button class="door-btn" data-part="door_lf">Front Left Door</button>
+            <button class="door-btn" data-part="door_rf">Front Right Door</button>
+            <button class="door-btn" data-part="door_lr">Rear Left Door</button>
+            <button class="door-btn" data-part="door_rr">Rear Right Door</button>
+            <button class="door-btn" data-part="windows">Roll Windows</button>
+            <button class="door-btn" data-part="mirrors">Fold Mirrors</button>
+            <button class="door-btn" data-part="chargeport">Charge Port</button>
+            <button class="door-btn" data-part="tonneau">Tonneau Cover</button>
+          </div>
+          <div class="slider-row" style="margin-top:8px;">
+            <label>Explosion / Part Spread</label>
+            <input type="range" id="slider-explode" min="0" max="1" step="0.01" value="0" />
+          </div>
+        </section>
+
+        <!-- SECTION 3: LIVE 3D WHEEL SWAPPER -->
+        <section class="control-section" id="sec-wheel-swap">
+          <div class="section-title-row">
+            <h3>Live 3D Wheel Swap</h3>
+            <span class="section-value" id="wheel-swap-label">Factory Default</span>
+          </div>
+          <select id="select-wheel-swap" class="studio-select">
+            <option value="">Factory Default Wheels</option>
+          </select>
+          <div class="sub-options-row">
+            <div class="sub-col">
+              <label class="tiny-label">Interior Cabin</label>
+              <div class="pill-row" id="interior-pills">
+                <button class="mini-pill active" data-interior="black">Black</button>
+                <button class="mini-pill" data-interior="white">Ultra White</button>
+                <button class="mini-pill" data-interior="cream">Cream</button>
+              </div>
+            </div>
+            <div class="sub-col">
+              <label class="tiny-label">Brake Calipers</label>
+              <div class="pill-row" id="caliper-pills">
+                <button class="mini-pill active" data-caliper="#d41418">Red</button>
+                <button class="mini-pill" data-caliper="#eab308">Gold</button>
+                <button class="mini-pill" data-caliper="#94a3b8">Silver</button>
+                <button class="mini-pill" data-caliper="#1e293b">Black</button>
+              </div>
+            </div>
+          </div>
+          <div class="slider-row">
+            <label>Window Tint Opacity</label>
+            <input type="range" id="slider-tint" min="0.15" max="0.92" step="0.02" value="0.55" />
+          </div>
+        </section>
+
+        <!-- SECTION 4: STUDIO LIGHTING & PATH TRACER -->
+        <section class="control-section">
+          <div class="section-title-row">
+            <h3>Lighting &amp; Path Tracing</h3>
+            <span class="section-value" id="env-name-label">Showroom Dark</span>
+          </div>
+          <div class="env-grid" id="env-buttons">
+            <button class="env-btn active" data-env="showroom">Showroom Dark</button>
+            <button class="env-btn" data-env="sunset">Golden Hour</button>
+            <button class="env-btn" data-env="cyber">Cyber Neon</button>
+            <button class="env-btn" data-env="studio">White Studio</button>
+            <button class="env-btn" data-env="alpine">Alpine Day</button>
+          </div>
+          <div class="slider-row">
+            <label>Studio Exposure</label>
+            <input type="range" id="slider-exposure" min="0.4" max="2.4" step="0.05" value="1.15" />
+          </div>
+          <div class="slider-row">
+            <label>Environment Rotation</label>
+            <input type="range" id="slider-env-rot" min="0" max="360" step="1" value="35" />
+          </div>
+          <div class="slider-row">
+            <label>Headlights &amp; Taillights</label>
+            <input type="range" id="slider-lights-emissive" min="0" max="5" step="0.1" value="2.4" />
+          </div>
+          <div class="slider-row">
+            <label>Floor Reflectivity</label>
+            <input type="range" id="slider-floor-refl" min="0" max="1" step="0.02" value="0.45" />
+          </div>
+          <div class="slider-row">
+            <label>Path-Trace Bounces</label>
+            <input type="range" id="slider-pt-bounces" min="2" max="10" step="1" value="5" />
+          </div>
+          <div class="slider-row">
+            <label>DOF Aperture (f-stop)</label>
+            <input type="range" id="slider-pt-aperture" min="0" max="0.08" step="0.002" value="0.008" />
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- SCENE HIERARCHY MODAL -->
+    <div id="scene-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2>Scene Graph &amp; Mesh Inspector</h2>
+            <p class="modal-sub" id="modal-model-subtitle">Click any mesh node to toggle visibility or isolate part</p>
+          </div>
+          <button id="btn-close-modal" class="icon-btn">Close &times;</button>
+        </div>
+        <div class="modal-toolbar">
+          <input type="text" id="node-search" placeholder="Filter nodes by name or material..." />
+          <button id="btn-show-all-nodes" class="mini-action-btn">Show All Nodes</button>
+        </div>
+        <div id="scene-tree-list" class="scene-tree-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
