@@ -1,0 +1,14 @@
+Tesla Metal Viewer initializing on: Apple M4
+Validated cybertruck: 13 clips, 265 surfaces
+Validated model3_high: 13 clips, 129 surfaces
+Validated modely_high: 23 clips, 125 surfaces
+Validated models_plaid: 13 clips, 169 surfaces
+Validated modelx_plaid: 17 clips, 176 surfaces
+Validated semi: 6 clips, 105 surfaces
+Validated bayberry: 11 clips, 120 surfaces
+Validated bayberry_e41: 11 clips, 99 surfaces
+Validated bayberry_e80: 11 clips, 101 surfaces
+Validated poppyseed: 13 clips, 156 surfaces
+Validated models_legacy: 13 clips, 74 surfaces
+Validated modelx_legacy: 17 clips, 87 surfaces
+Validation failures: []

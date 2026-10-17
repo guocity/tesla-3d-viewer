@@ -1,72 +1,50 @@
-# Tesla Metal Ray Tracing Studio
+# Tesla APK Asset Studio
 
-A native macOS 3D application written in **Swift + MetalKit** utilizing **Apple Metal hardware-accelerated ray tracing** (`metal::raytracing`) on Apple Silicon (M4).
+Native SwiftUI + Metal ray tracing viewer for the 12 vehicle scenes extracted from Tesla Android 4.61.6. Run `../launch_metal_viewer.sh` from this directory, or open `TeslaMetalViewer.app`. The launch script rebuilds the executable and refreshes bundled models.
 
----
+## What changed
 
-## Key Features
+- Materials follow each source surface's resource path and instance override. Window, chrome, paint, rubber, and interior assignments no longer depend on mesh-name guesses or hardcoded triangle regions.
+- Albedo, packed metallic/roughness/AO maps, UV2 AO, and paint custom-color masks are retained. Android ETC textures are sampled directly by Metal; lossless source textures remain embedded in the GLBs.
+- Decimal JSON transforms are explicitly converted through NSNumber. Wheel mounts, light lenses, pivots, and animation keyframes keep their source transforms.
+- The inspector exposes 161 usable source clips as checkboxes with shared playback and scrubbing. Compatible clips play together; shorter clips hold their end pose, and selecting a clip that controls the same joint channel replaces its conflicting selection. All keyframes are retained, including compound falcon-wing tracks. Absent regional variants and sensor-only tracks are recorded in `../models/source-audit.json`.
+- Driving ports the APK road texture, lane placement, UV scrolling, and wheel-socket rotation. Climate ports the source airflow planes, edge-fade shader, timing and colors; its seamless noise is generated using Godot's OpenSimplex algorithm and the APK's parameters. Charging uses the APK cable meshes, source charge-port anchor, and flow shader.
+- Cybertruck wheels attach to the animated source Spatials, including the rear axle; the suspension raises the body while keeping all four tires grounded. Windows use neutral optical transmission with optional privacy tint, independent of Godot blend colors.
+- Light covers use neutral 99% optical transmission and traverse nested lens shells, so the source light assemblies remain visible. Rubber uses a matte, nonmetallic finish with a subdued reflection lobe. These are viewer material calibrations; APK resource bindings remain intact.
+- Area-light sampling produces soft ray-traced shadows; ground occlusion supplies tire contact shadows. Progressive rendering resumes after camera movement stops.
 
-1. **All 12 Extracted Tesla Car Models**:
-   - **Cybertruck Cyberbeast** (Tri-Motor AWD, Stainless Steel)
-   - **Model 3 Highland** (Redesigned Aero Body)
-   - **Model Y Highland / Juniper** (Compact SUV AWD)
-   - **Model S Plaid** (Tri-Motor Palladium, Carbon Rotors)
-   - **Model X Plaid** (Tri-Motor Falcon Wing SUV)
-   - **Tesla Semi** (Class 8 Heavy Duty)
-   - **Project Bayberry (Juniper)** (Pre-Production Prototype)
-   - **Project Bayberry E41** (High-Downforce Package)
-   - **Project Bayberry E80** (Extended Wheelbase Performance)
-   - **Project Poppyseed** (Experimental Compact Platform)
-   - **Model S (Raven)** (Legacy Performance)
-   - **Model X (Raven)** (Legacy Performance)
+## Controls
 
-2. **Apple Silicon Hardware Ray Tracing (`metal::raytracing`)**:
-   - Hardware-built BVH acceleration structures (`MTLPrimitiveAccelerationStructure`)
-   - Primary camera ray casting with sub-pixel jittered anti-aliasing
-   - Ray-traced shadow rays towards studio key lights
-   - Secondary ray bounces for realistic metallic body reflections and chrome highlights
-   - Progressive temporal accumulation (converges up to 256 samples)
-   - ACES film tone mapping & sRGB gamma output
+Two-finger motion or left/middle drag orbits. Hold Shift to pan; right drag also pans. Pinch, mouse wheel, or Control + two fingers zooms. Gestures keep their initial mode until release, ignore trackpad momentum, and scale pan speed to distance and viewport size. Next Model in the header cycles through vehicles and wraps at the end. Fit and the five camera presets frame the vehicle. The Tour button and Camera tour inspector restore the cinematic walkthrough, with speed, progress, and restart controls. Manual navigation stops camera automation. A persistent inspector contains model, paint, source-animation, runtime-effect and floor controls, plus a component/material audit. Runtime effects use the source's above-cabin airflow display. Charging opens the source charge-port clip and shows the US cable when that anchor exists.
 
-3. **Nice Studio Ground with Real Car Reflections**:
-   - Physical ground pedestal positioned at \(y = 0.0\) touching tires
-   - Ray-traced ground reflection rays shooting upwards into vehicle undercarriage and wheels
-   - Adjustable Ground Reflectivity (\(0.0\) to \(1.0\)) and Ground Roughness (\(0.0\) to \(0.45\))
-   - Ground presets: *Mirror Obsidian*, *Studio Satin*, *Matte Pedestal*
-   - Contact ambient occlusion and soft vehicle ground shadows
+## Rebuild and verify
 
-4. **Metallic Paint & Finish Controls**:
-   - 8 OEM Tesla paint presets (*Stainless Steel*, *Quicksilver*, *Ultra Red*, *Stealth Grey*, *Deep Blue*, *Pearl White*, *Solid Black*, *Founders Gold*)
-   - Metallic Flake slider
-   - Paint Roughness slider
-   - Clearcoat Gloss slider
+Requires macOS 14+, an Apple Silicon Metal ray-tracing device, Xcode's Swift toolchain, REA, and Python with NumPy/Pillow. Nothing is installed automatically.
 
-5. **Camera Presets & Turntable Orbit**:
-   - Camera views: **Hero 3/4**, **Side Profile**, **Front Fascia**, **Rear 3/4**, **Top Aero**
-   - Interactive orbit (left-drag), pan (right-drag), and zoom (scroll wheel / pinch)
-   - Auto-rotating cinematic **Turntable** orbit mode
-
----
-
-## How to Launch
-
-### Option 1: One-Click Launch Script
-From the repository root:
-```bash
-./launch_metal_viewer.sh
+```sh
+python3 ../tools/rebuild_assets.py /absolute/path/to/tesla.apkm
+./create_app_bundle.sh
+.build/release/TeslaMetalViewer --validate-models
 ```
 
-Or from inside `TeslaMetalViewer/`:
-```bash
-./run.sh
+The asset rebuild starts from the APKM and extracts the nested asset-pack APK with REA. No temporary extraction path is hardcoded. Extraction provenance is saved in `../evidence/rea-extraction.json`.
+
+Offscreen exports use the same Metal shaders as the app:
+
+```sh
+.build/release/TeslaMetalViewer --model modelx_plaid --animation LRDoorAnimationComplete --animation-time 1 --render-out /tmp/modelx-open.png
+.build/release/TeslaMetalViewer --model model3_high --preset rear --charging --animation ChargeportAnimation --animation-time 1.5 --render-out /tmp/charging.png
+.build/release/TeslaMetalViewer --model model3_high --climate 1 --driving 30 --effect-time 2 --render-out /tmp/effects.png
 ```
 
-### Option 2: Finder
-Double-click `TeslaMetalViewer.app` located at:
-`tesla-3d-viewer/TeslaMetalViewer/TeslaMetalViewer.app`
+Pass comma-separated clip names to `--animation` to render simultaneous clips, for example `--animation HoodAnimation,RFDoorAnimation`. In the app, check multiple clips, then Play or scrub their shared timeline. Play restarts from zero after reaching the end.
 
-### Option 3: Swift CLI
-```bash
-cd TeslaMetalViewer
-swift run
-```
+`--validate-features` checks optical window/lens materials, matte rubber, all four Cybertruck tires at all six suspension keyframes, combined poses, conflicting selection, playback restart, tour motion, navigation routing, pan scaling, and model cycling.
+
+`--climate 1` selects cool, `2` selects heat. `--driving` is signed mph. Unknown animation names fail explicitly. `--validate-models` loads every vehicle and verifies that every exported clip moves visible vertices.
+
+## Fidelity boundaries
+
+This is a Metal translation of Godot assets and selected runtime shaders, not Tesla's Godot renderer. It retains source material bindings, scalar PBR values, texture maps, geometry, pivots and supported transform/value tracks. Normal maps, arbitrary Godot shaders, FSD/rainbow/terrain logic, regional charging connectors and every configuration variant are not implemented. The studio lighting and tone mapping are viewer features. Source codenames are shown without assigning speculative trim specifications.
+
+The legacy browser viewer shares the corrected material metadata and keyframe data; the complete runtime-effect implementation and native inspector are in this Metal app.

@@ -36,6 +36,8 @@ public class Camera {
     public var minDistance: Float = 1.0
     public var maxDistance: Float = 25.0
     public var fovYDegrees: Float = 45.0
+    public var viewportAspect: Float = 1.5
+    public var viewportHeight: Float = 700
     
     public var isTurntableEnabled: Bool = false
     public var turntableSpeed: Float = 0.008
@@ -55,15 +57,15 @@ public class Camera {
     }
     
     public func zoom(delta: Float) {
-        distance = simd_clamp(distance * delta, minDistance, maxDistance)
+        distance = simd_clamp(distance * max(0.1, min(delta, 10)), minDistance, maxDistance)
     }
     
     public func pan(deltaX: Float, deltaY: Float) {
         let forward = simd_normalize(target - position)
         let right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 1, 0)))
         let up = simd_normalize(simd_cross(right, forward))
-        let sensitivity = max(distance * 0.0016, 0.004)
-        target += right * (deltaX * sensitivity) + up * (deltaY * sensitivity)
+        let sensitivity = 2 * distance * tan(fovYDegrees * .pi / 360) / max(viewportHeight, 1)
+        target -= right * (deltaX * sensitivity) + up * (deltaY * sensitivity)
     }
     
     public func recenter(center: SIMD3<Float>) {
@@ -96,6 +98,9 @@ public class Camera {
             elevation = Float.pi * 0.46
             distance = r * 2.5
         }
+        let vertical = fovYDegrees * .pi / 180
+        let horizontal = 2 * atan(tan(vertical/2) * max(0.1,viewportAspect))
+        distance = max(distance, r / sin(min(vertical,horizontal)/2) * 1.05)
     }
     
     public var tourTime: Float = 0.0
@@ -159,9 +164,9 @@ public class Camera {
         return (progress, k0.name)
     }
     
-    public func updateTurntable() {
+    public func updateTurntable(deltaTime: Float = 1.0 / 60.0) {
         if isTurntableEnabled {
-            azimuth += turntableSpeed
+            azimuth += turntableSpeed * deltaTime * 60
             if azimuth > Float.pi * 2 { azimuth -= Float.pi * 2 }
         }
     }

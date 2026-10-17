@@ -1,3 +1,4 @@
 #!/bin/bash
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-open "$SCRIPT_DIR/TeslaMetalViewer/TeslaMetalViewer.app" --args "$@"
+exec "$SCRIPT_DIR/TeslaMetalViewer/run.sh" "$@"

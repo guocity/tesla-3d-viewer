@@ -3,12 +3,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$SCRIPT_DIR/TeslaMetalViewer.app"
-BIN_DIR="$SCRIPT_DIR/.build/out/Products/Release"
-
-if [ ! -f "$BIN_DIR/TeslaMetalViewer" ]; then
-    echo "Release binary not found, building with swift build -c release..."
-    swift build -c release
-fi
+export CLANG_MODULE_CACHE_PATH="$SCRIPT_DIR/.build/clang-cache"
+export SWIFTPM_MODULECACHE_OVERRIDE="$SCRIPT_DIR/.build/swift-cache"
+swift build --package-path "$SCRIPT_DIR" -c release -debug-info-format none
+BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c release --show-bin-path)"
 
 echo "Creating TeslaMetalViewer.app macOS bundle..."
 rm -rf "$APP_DIR"

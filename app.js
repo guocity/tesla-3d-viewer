@@ -876,6 +876,12 @@ function upgradeModelMaterials(root) {
 
     newMat.wireframe = state.wireframe;
     newMat.userData.category = category;
+    if (category !== 'paint' && oldMat) {
+      newMat.color.copy(oldMat.color);
+      newMat.metalness = oldMat.metalness ?? newMat.metalness;
+      newMat.roughness = oldMat.roughness ?? newMat.roughness;
+      newMat.userData.sourcePath = oldMat.userData?.sourcePath;
+    }
     materialCache.set(cacheKey, newMat);
     state.materialBuckets.all.push(newMat);
     node.material = newMat;
@@ -934,9 +940,10 @@ function buildArticulationTracks(root, asset) {
     Chargeport: 'chargeport',
   };
 
+  root.traverse(node => { if (node.userData?.effect === 'charging') node.visible = false; });
   const rawAnims = asset.animations || [];
   for (const anim of rawAnims) {
-    const partKey = animNameMap[anim.name];
+    const partKey = animNameMap[anim.name.replace(/Animation/g, "")];
     if (!partKey) continue;
 
     for (const tr of anim.tracks || []) {
@@ -953,43 +960,13 @@ function buildArticulationTracks(root, asset) {
       map[partKey].push({
         node,
         prop,
-        start: tr.start,
-        end: tr.end,
+        start: tr.values?.[0] || tr.start,
+        end: tr.values?.at(-1) || tr.end,
+        values: tr.values,
+        times: tr.times,
+        type: tr.type,
+        duration: anim.duration || 1,
       });
-    }
-  }
-
-  const fallbackDefs = [
-    { part: 'frunk', names: ['Hood_Spatial', 'Hood_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, 0, 68] },
-    { part: 'trunk', names: ['Trunk_Spatial', 'Trunk_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, 0, -68] },
-    { part: 'door_lf', names: ['Door_LF_Spatial', 'Door_LF_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, -65, 0] },
-    { part: 'door_rf', names: ['Door_RF_Spatial', 'Door_RF_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, 65, 0] },
-    { part: 'door_lr', names: ['Door_LR_Spatial', 'Door_LR_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, -65, 0] },
-    { part: 'door_rr', names: ['Door_RR_Spatial', 'Door_RR_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, 65, 0] },
-    { part: 'chargeport', names: ['Charge_Cap_Spatial', 'Charge_Port_Spatial', 'ChargeCap_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [82, 0, 0] },
-    { part: 'windows', names: ['Window_LF_Spatial', 'Window_RF_Spatial', 'Window_LR_Spatial', 'Window_RR_Spatial', 'Window_FL', 'Window_FR', 'Window_RL', 'Window_RR'], prop: 'delta_translation', start: [0, 0, 0], end: [0, -0.34, 0] },
-    { part: 'mirrors', names: ['Door_LF_Mirror_Spatial', 'Door_LF_Mirror_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, 42, 0] },
-    { part: 'mirrors', names: ['Door_RF_Mirror_Spatial', 'Door_RF_Mirror_Locator'], prop: 'rotation_degrees', start: [0, 0, 0], end: [0, -42, 0] },
-    { part: 'tonneau', names: ['Tonneau_Cover'], prop: 'delta_translation', start: [0, 0, 0], end: [1.35, 0.14, 0] },
-  ];
-
-  for (const fb of fallbackDefs) {
-    if (map[fb.part].length > 0) continue;
-    for (const candidateName of fb.names) {
-      const node = findNodeByPathOrName(root, candidateName);
-      if (node) {
-        if (!node.userData.origPos) {
-          node.userData.origPos = node.position.clone();
-          node.userData.origQuat = node.quaternion.clone();
-          node.userData.origScale = node.scale.clone();
-        }
-        map[fb.part].push({
-          node,
-          prop: fb.prop,
-          start: fb.start,
-          end: fb.end,
-        });
-      }
     }
   }
 
@@ -1021,31 +998,48 @@ function applyArticulationStep(dt) {
 
       const tracks = state.resolvedTracks[part] || [];
       for (const tr of tracks) {
-        const { node, prop, start, end } = tr;
+        const { node, prop } = tr;
+        let { start, end } = tr;
+        let fraction = eased;
+        if (tr.times?.length && tr.values?.length) {
+          const time = eased * tr.duration;
+          const upper = tr.times.findIndex(value => value >= time);
+          const hi = upper < 0 ? tr.times.length - 1 : upper;
+          const lo = Math.max(0, hi - 1);
+          fraction = hi === lo ? 0 : (time - tr.times[lo]) / Math.max(1e-6, tr.times[hi] - tr.times[lo]);
+          start = tr.values[lo]; end = tr.values[hi];
+        }
+        if (!start || !end) continue;
+        if (tr.type === 'transform') {
+          node.position.fromArray(start).lerp(new THREE.Vector3().fromArray(end), fraction);
+          node.quaternion.fromArray(start, 3).slerp(new THREE.Quaternion().fromArray(end, 3), fraction);
+          node.scale.fromArray(start, 7).lerp(new THREE.Vector3().fromArray(end, 7), fraction);
+          continue;
+        }
         if (prop === 'rotation_degrees') {
-          const rx = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[0], end[0], eased));
-          const ry = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[1], end[1], eased));
-          const rz = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[2], end[2], eased));
+          const rx = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[0], end[0], fraction));
+          const ry = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[1], end[1], fraction));
+          const rz = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(start[2], end[2], fraction));
           const euler = new THREE.Euler(rx, ry, rz, 'YXZ');
           node.quaternion.setFromEuler(euler);
         } else if (prop === 'translation') {
           node.position.set(
-            THREE.MathUtils.lerp(start[0], end[0], eased),
-            THREE.MathUtils.lerp(start[1], end[1], eased),
-            THREE.MathUtils.lerp(start[2], end[2], eased)
+            THREE.MathUtils.lerp(start[0], end[0], fraction),
+            THREE.MathUtils.lerp(start[1], end[1], fraction),
+            THREE.MathUtils.lerp(start[2], end[2], fraction)
           );
         } else if (prop === 'delta_translation') {
           const orig = node.userData.origPos || new THREE.Vector3();
           node.position.set(
-            orig.x + THREE.MathUtils.lerp(start[0], end[0], eased),
-            orig.y + THREE.MathUtils.lerp(start[1], end[1], eased),
-            orig.z + THREE.MathUtils.lerp(start[2], end[2], eased)
+            orig.x + THREE.MathUtils.lerp(start[0], end[0], fraction),
+            orig.y + THREE.MathUtils.lerp(start[1], end[1], fraction),
+            orig.z + THREE.MathUtils.lerp(start[2], end[2], fraction)
           );
         } else if (prop === 'scale') {
           node.scale.set(
-            THREE.MathUtils.lerp(start[0], end[0], eased),
-            THREE.MathUtils.lerp(start[1], end[1], eased),
-            THREE.MathUtils.lerp(start[2], end[2], eased)
+            THREE.MathUtils.lerp(start[0], end[0], fraction),
+            THREE.MathUtils.lerp(start[1], end[1], fraction),
+            THREE.MathUtils.lerp(start[2], end[2], fraction)
           );
         }
       }

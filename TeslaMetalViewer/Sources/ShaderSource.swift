@@ -7,31 +7,37 @@ public struct ShaderSource {
     using namespace metal;
     using namespace metal::raytracing;
 
-    // 32-byte 16-byte aligned vertex structure matching Swift SIMD4<Float> layout exactly
+    // 48-byte 16-byte aligned vertex structure matching Swift SIMD4<Float> layout exactly
     struct Vertex {
-        float4 position; // offset 0..16
-        float4 normal;   // offset 16..32
+        float4 position;
+        float4 uv;
+        float4 normal;
     };
 
-    // 48-byte 16-byte aligned geometry metadata
+    // 64-byte 16-byte aligned geometry metadata
     struct GeometryInfo {
-        uint vertexOffset;   // offset 0..4
-        uint indexOffset;    // offset 4..8
-        uint isGround;       // offset 8..12
-        uint isPaint;        // offset 12..16
-        float4 baseColor;    // offset 16..32 (xyz = rgb, w = metallic)
-        float4 params;       // offset 32..48 (x = roughness, y = clearcoat, z = emissive, w = 0)
+        int4 textures;
+        uint vertexOffset;
+        uint indexOffset;
+        uint isGround;
+        uint isPaint;
+        float4 baseColor;
+        float4 params;
     };
 
-    // 208-byte 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
+    // 368-byte 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
     struct Uniforms {
-        float4x4 invView;     // offset 0..64
-        float4x4 invProj;     // offset 64..128
-        float4 cameraPos;     // offset 128..144 (xyz = pos, w = 1.0)
-        float4 carPaintColor; // offset 144..160 (xyz = rgb, w = metallic)
-        float4 params;        // offset 160..176 (x = roughness, y = clearcoat, z = groundReflectivity, w = groundRoughness)
-        uint4 viewport;       // offset 176..192 (x = width, y = height, z = sampleIndex, w = isAccumulating)
-        float4 tintParams;    // offset 192..208 (x = isPrivacyTint, y = transmission, z = darkness, w = 0)
+        float4 effectParams;
+        int4 effectTextures;
+        float4x4 climateLeft;
+        float4x4 climateRight;
+        float4x4 invView;
+        float4x4 invProj;
+        float4 cameraPos;
+        float4 carPaintColor;
+        float4 params;
+        uint4 viewport;
+        float4 tintParams;
     };
 
     // Studio environment map gradient & overhead lighting softbox
@@ -50,7 +56,7 @@ public struct ShaderSource {
         // Studio rim backlight
         float rim = max(dot(dir, normalize(float3(-0.8, 0.35, 0.4))), 0.0);
         bg += float3(0.3, 0.5, 0.9) * pow(rim, 7.0);
-        
+
         // Studio fill warm light
         float warm = max(dot(dir, normalize(float3(0.7, 0.5, -0.5))), 0.0);
         bg += float3(0.6, 0.45, 0.3) * pow(warm, 5.0);
@@ -71,6 +77,7 @@ public struct ShaderSource {
         constant Uniforms &uniforms [[buffer(4)]],
         texture2d<float, access::read_write> accumTex [[texture(0)]],
         texture2d<float, access::write> outputTex [[texture(1)]],
+        array<texture2d<float>, 32> sourceTextures [[texture(2)]],
         uint2 gid [[thread_position_in_grid]])
     {
         uint width = uniforms.viewport.x;
@@ -102,6 +109,7 @@ public struct ShaderSource {
         intersector<triangle_data> inter;
         typename intersector<triangle_data>::result_type hit = inter.intersect(primaryRay, accel);
 
+        constexpr sampler materialSampler(coord::normalized, address::repeat, filter::linear);
         float3 color = sampleStudioEnv(rayDir);
 
         if (hit.type == intersection_type::triangle) {
@@ -123,10 +131,35 @@ public struct ShaderSource {
             float3 normal = normalize(w * n0 + b.x * n1 + b.y * n2);
             if (dot(normal, rayDir) > 0.0) normal = -normal;
 
+            float2 texUV = w*vertices[i0].uv.xy + b.x*vertices[i1].uv.xy + b.y*vertices[i2].uv.xy;
+            float2 texUV2 = w*vertices[i0].uv.zw + b.x*vertices[i1].uv.zw + b.y*vertices[i2].uv.zw;
+            float3 texColor = float3(1.0);
+            if (mat.textures.x >= 0) {
+                float4 sample = sourceTextures[mat.textures.x].sample(materialSampler,(mat.textures.w & 16) != 0 ? texUV2 : texUV);
+                texColor = pow(max(sample.rgb,0.0),float3(2.2));
+                if ((mat.textures.w & 16) != 0) {
+                    texColor = mix(float3(1),sample.rgb/10.0/max(uniforms.carPaintColor.xyz,float3(0.001)),sample.a);
+                    mat.params.x = mix(mat.params.x,0.9,sample.a);
+                    mat.baseColor.w = mix(mat.baseColor.w,0.0,sample.a);
+                }
+                mat.baseColor.xyz *= texColor;
+            }
+            if (mat.textures.y >= 0) {
+                float3 mra = sourceTextures[mat.textures.y].sample(materialSampler,texUV).rgb;
+                mat.baseColor.w *= mra.r;
+                mat.params.x *= mra.g;
+            }
+            float materialAO = 1.0;
+            if (mat.textures.z >= 0) {
+                float4 ao = sourceTextures[mat.textures.z].sample(materialSampler,(mat.textures.w & 32) != 0 ? texUV2 : texUV);
+                materialAO = ao[(mat.textures.w & 3)];
+            }
             float3 hitPos = rayOrigin + rayDir * hit.distance;
 
             // Key studio directional light
             float3 keyLightPos = float3(5.5, 9.5, 6.5);
+            // Sample the rectangular softbox; accumulation integrates its penumbra.
+            keyLightPos += float3((rand(seed)-0.5)*3.0, 0.0, (rand(seed)-0.5)*2.0);
             float3 lightDir = normalize(keyLightPos - hitPos);
             float NdotL = max(dot(normal, lightDir), 0.0);
 
@@ -145,14 +178,31 @@ public struct ShaderSource {
                 // NICE STUDIO GROUND & REAL VEHICLE REFLECTIONS
                 // ============================================================
                 float distFromCenter = length(hitPos.xz);
-                float vignette = smoothstep(22.0, 4.0, distFromCenter);
+                float vignette = 1.0 - smoothstep(15.0, 45.0, distFromCenter);
 
-                // Subtle high-end studio pedestal ring
-                float ring = 1.0 - smoothstep(0.0, 0.04, abs(distFromCenter - 3.8));
+                float3 groundBase = float3(0.10, 0.115, 0.14);
+                // Cosine-weighted ambient occlusion supplies actual tire contact shadows.
+                float phi = rand(seed) * 6.2831853;
+                float r = sqrt(rand(seed));
+                ray aoRay;
+                aoRay.origin = hitPos + float3(0,0.003,0);
+                aoRay.direction = float3(r*cos(phi),sqrt(1.0-r*r),r*sin(phi));
+                aoRay.min_distance = 0.002;
+                aoRay.max_distance = 1.2;
+                auto aoHit = inter.intersect(aoRay, accel);
+                float ao = aoHit.type == intersection_type::none ? 1.0 : mix(0.2,1.0,clamp(aoHit.distance/1.2,0.0,1.0));
+                groundBase *= (0.18 + 0.82 * shadow) * ao;
 
-                float3 groundBase = mix(float3(0.045, 0.05, 0.065), float3(0.09, 0.10, 0.13), ring * 0.35);
-                groundBase *= (0.35 + 0.65 * shadow);
-
+                if (abs(uniforms.effectParams.y) > 0.01 && uniforms.effectTextures.x >= 0) {
+                    // road.tscn: +/-1.8m lane placement, .1 x 100m planes, UV scale (1,8).
+                    float laneX = (abs(hitPos.z)-1.8)/0.1 + 0.5;
+                    if (laneX >= 0.0 && laneX <= 1.0) {
+                        float offset = clamp(uniforms.effectParams.y,-20.0,60.0)/60.0*1.8*uniforms.effectParams.x;
+                        float2 uvLane = float2(laneX,(hitPos.x/100.0+0.5)*8.0+5.064+offset);
+                        float4 lane = sourceTextures[uniforms.effectTextures.x].sample(materialSampler,uvLane);
+                        groundBase = mix(groundBase,float3(0.2),lane.a);
+                    }
+                }
                 float groundRoughness = uniforms.params.w;
                 float groundReflectivity = uniforms.params.z;
 
@@ -193,7 +243,7 @@ public struct ShaderSource {
                     } else {
                         carBase = carMat.baseColor.xyz;
                     }
-                    
+
                     reflectedColor = carBase * 0.90;
                 }
 
@@ -209,38 +259,23 @@ public struct ShaderSource {
                 // ============================================================
                 float transmission = mat.params.w;
                 float3 glassTint = mat.baseColor.xyz;
-                
+
                 // If tinted glass roof or rear privacy windows (Cat 3):
-                if (mat.baseColor.x < 0.50 && mat.params.w < 0.60) {
+                if ((mat.textures.w & 512) != 0) {
                     if (uniforms.tintParams.x > 0.5) {
                         // Deep factory privacy tint option enabled:
                         transmission = uniforms.tintParams.y;
                         float darkness = uniforms.tintParams.z;
-                        glassTint = mix(float3(0.14, 0.16, 0.20), float3(0.025, 0.030, 0.038), darkness);
-                    } else {
-                        // Privacy tint OFF: All rear windows & glass roof become 100% clear transparent glass!
-                        transmission = 0.92;
-                        glassTint = float3(0.92, 0.95, 0.98);
+                        glassTint = mix(float3(0.94, 0.97, 1.0), float3(0.65, 0.72, 0.80), darkness);
                     }
                 }
-                
-                // ============================================================
-                // WINDSHIELD PERIMETER FRAME (SUBTLE THIN FRIT BORDER)
-                // ============================================================
-                // Never use thick opaque overlays across the glass viewing area!
-                // Model X has a giant panoramic windshield - no blocker allowed.
-                // Cybertruck windshield must be fully transparent - no blocker allowed.
-                // Any perimeter frit border must be strictly a thin edge border, never an opaque blocker.
-                bool isWindshieldFrame = false;
-                // Exclude Model X (windshield extends to X < 0.15) and Cybertruck (hitPos.x ~ 1.12 to 2.05) from opaque blocking
-                // We keep windshield glass crystal clear. No blocker overlay on glass!
-                
+
                 float3 viewDir = -rayDir;
                 float NdotV = max(dot(normal, viewDir), 0.0);
-                
+
                 // Fresnel reflection coefficient (air-to-glass IOR ~1.5, F0 ~0.04)
                 float fresnel = 0.04 + 0.96 * pow(1.0 - NdotV, 5.0);
-                
+
                 // 1. Ray-traced secondary reflection ray for glossy environment reflection
                 float3 reflDir = reflect(rayDir, normal);
                 ray glassReflRay;
@@ -248,7 +283,7 @@ public struct ShaderSource {
                 glassReflRay.direction = reflDir;
                 glassReflRay.min_distance = 0.01;
                 glassReflRay.max_distance = 50.0;
-                
+
                 typename intersector<triangle_data>::result_type reflHit = inter.intersect(glassReflRay, accel);
                 float3 reflColor = sampleStudioEnv(reflDir);
                 if (reflHit.type == intersection_type::triangle) {
@@ -256,23 +291,30 @@ public struct ShaderSource {
                     float3 rBase = (rMat.isPaint == 1) ? uniforms.carPaintColor.xyz : rMat.baseColor.xyz;
                     reflColor = (rMat.isGround == 1) ? float3(0.06, 0.07, 0.09) : rBase;
                 }
-                
+
                 // 2. Ray-traced transmission ray passing through the glass into interior / headlights
                 ray transRay;
-                transRay.origin = hitPos + rayDir * 0.005;
+                transRay.origin = hitPos + rayDir * 0.0004;
                 transRay.direction = rayDir;
-                transRay.min_distance = 0.006;
+                transRay.min_distance = 0.0002;
                 transRay.max_distance = 35.0;
-                
+
                 typename intersector<triangle_data>::result_type transHit = inter.intersect(transRay, accel);
                 float3 transColor = sampleStudioEnv(rayDir);
-                
+                // Traverse both lens interfaces and any nested clear covers before shading.
+                // Shading a second glass hit as opaque made layered headlamps look black.
+                for (int layer = 0; layer < 8; ++layer) {
+                    if (transHit.type != intersection_type::triangle || geometries[transHit.geometry_id].params.w <= 0.01) break;
+                    transRay.origin += rayDir * (transHit.distance + 0.0004);
+                    transHit = inter.intersect(transRay, accel);
+                }
+
                 if (transHit.type == intersection_type::triangle) {
                     GeometryInfo tMat = geometries[transHit.geometry_id];
                     uint ti0 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 0];
                     uint ti1 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 1];
                     uint ti2 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 2];
-                    
+
                     float2 tb = transHit.triangle_barycentric_coord;
                     float tw = 1.0 - tb.x - tb.y;
                     float3 tn0 = vertices[ti0].normal.xyz;
@@ -280,15 +322,19 @@ public struct ShaderSource {
                     float3 tn2 = vertices[ti2].normal.xyz;
                     float3 tn = normalize(tw * tn0 + tb.x * tn1 + tb.y * tn2);
                     if (dot(tn, rayDir) > 0.0) tn = -tn;
-                    
+
                     float3 tHitPos = transRay.origin + rayDir * transHit.distance;
                     float3 tLightDir = normalize(keyLightPos - tHitPos);
                     float tNdotL = max(dot(tn, tLightDir), 0.0);
-                    
+
                     float3 tBase = (tMat.isPaint == 1) ? uniforms.carPaintColor.xyz : tMat.baseColor.xyz;
+                    float2 tUV = tw*vertices[ti0].uv.xy + tb.x*vertices[ti1].uv.xy + tb.y*vertices[ti2].uv.xy;
+                    if (tMat.textures.x >= 0 && (tMat.textures.w & 16) == 0) {
+                        tBase *= pow(max(sourceTextures[tMat.textures.x].sample(materialSampler,tUV).rgb,0.0),float3(2.2));
+                    }
                     float tMetallic = (tMat.isPaint == 1) ? uniforms.carPaintColor.w : tMat.baseColor.w;
                     float tEmissive = tMat.params.z;
-                    
+
                     // Interior shading: Chrome reflector, LED emitter, or cabin interior
                     if (tEmissive > 0.1) {
                         transColor = tBase * (1.0 + tEmissive * 2.0);
@@ -303,18 +349,18 @@ public struct ShaderSource {
                         transColor = interiorAmbient + interiorDiffuse;
                     }
                 }
-                
+
                 // Attenuate transmitted color by glass tint
                 transColor *= glassTint;
-                
+
                 // Specular highlight from key studio light on outer glass surface
                 float3 halfDir = normalize(lightDir + viewDir);
                 float NdotH = max(dot(normal, halfDir), 0.0);
-                float glassSpec = pow(NdotH, 256.0) * 1.8;
-                
+                float glassSpec = pow(NdotH, 256.0) * ((mat.textures.w & 64) != 0 ? 0.12 : 0.35);
+
                 // Physical mix: transmitted light vs reflected light according to Fresnel
                 float3 glassBlend = mix(transColor, reflColor, fresnel);
-                
+
                 // If transmission < 1.0, blend between opaque surface and transmitted glass
                 float3 opaqueLook = glassTint * 0.1 + reflColor * fresnel;
                 color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec) + float3(mat.params.z);
@@ -322,11 +368,18 @@ public struct ShaderSource {
                 // ============================================================
                 // METALLIC CAR BODY & TESLA DETAILS
                 // ============================================================
-                float3 baseCol = (mat.isPaint == 1) ? uniforms.carPaintColor.xyz : mat.baseColor.xyz;
+                float3 baseCol = ((mat.isPaint == 1) ? uniforms.carPaintColor.xyz * texColor : mat.baseColor.xyz) * materialAO;
                 float metallic = (mat.isPaint == 1) ? uniforms.carPaintColor.w : mat.baseColor.w;
                 float roughness = (mat.isPaint == 1) ? uniforms.params.x : mat.params.x;
                 float clearcoat = (mat.isPaint == 1) ? uniforms.params.y : mat.params.y;
                 float emissive = mat.params.z;
+                if (mat.isGround == 3) {
+                    // PowerflowSingle.shader: flowing state, original cable pulse defaults.
+                    float flow = pow(max(1.0-fract(uniforms.effectParams.x/1.5-texUV.x/1.5),0.0),2.0);
+                    baseCol *= 0.2*(1.0-flow);
+                    emissive = flow;
+                    baseCol += float3(0.0,0.35,1.0)*flow;
+                }
 
 
                 float3 viewDir = -rayDir;
@@ -364,17 +417,43 @@ public struct ShaderSource {
                 float3 specular = mix(float3(spec), baseCol * spec, metallic) * shadow;
                 float3 ambient = baseCol * 0.08;
                 float3 metalRefl = mix(envRefl * fresnel, envRefl * baseCol, metallic);
+                if ((mat.textures.w & 128) != 0) {
+                    // Dry vulcanized rubber has a weak, broad lobe, not a polished clearcoat.
+                    specular *= 0.12;
+                    metalRefl *= 0.05;
+                }
 
                 // Clearcoat coat layer
                 float clearcoatSpec = pow(NdotH, 256.0) * clearcoat * 1.5;
 
-                color = diffuse + specular + ambient + metalRefl + float3(clearcoatSpec) + float3(emissive);
+                color = diffuse + specular + ambient + metalRefl + float3(clearcoatSpec) + (mat.isGround == 3 ? float3(0.0,0.35,1.0)*emissive : float3(emissive));
             }
         }
 
         // ============================================================
         // PROGRESSIVE ACCUMULATION & TONE MAPPING
         // ============================================================
+        if (uniforms.effectParams.z > 0.0) {
+            // airflow_shader.tres + Airflow.gdc: half-speed time, UV velocity -0.8,
+            // 1.5/.35 UV scale and the original edge-fade expression.
+            for (int plane = 0; plane < min(uniforms.effectTextures.y,2); ++plane) {
+                float4x4 inv = plane == 0 ? uniforms.climateLeft : uniforms.climateRight;
+                float3 o = (inv*float4(rayOrigin,1)).xyz;
+                float3 d = (inv*float4(rayDir,0)).xyz;
+                if (abs(d.z) < 0.0001) continue;
+                float distance = -o.z/d.z;
+                float2 uvAir = (o+d*distance).xy + 0.5;
+                if (distance > 0.0 && all(uvAir >= 0.0) && all(uvAir <= 1.0)) {
+                    uvAir.y = 1.0-uvAir.y;
+                    float2 noiseUV = uvAir*float2(1.5,0.35)+float2(0,-uniforms.effectParams.x*0.4);
+                    float noise = uniforms.effectTextures.z >= 0 ? sourceTextures[uniforms.effectTextures.z].sample(materialSampler,noiseUV).r : 0.5;
+                    float alpha = noise*(1.0-uvAir.y)*clamp(uvAir.y/0.05,0.0,1.0)*(1.0-abs(uvAir.x-0.5)*2.0)*3.0;
+                    float3 airColor = uniforms.effectParams.z > 1.5 ? float3(0.918,0.251,0.251) : float3(1);
+                    color += airColor*alpha*0.3;
+                }
+            }
+        }
+
         float4 prev = (isAccumulating == 1 && sampleIndex > 0) ? accumTex.read(gid) : float4(0.0);
         float4 blended = mix(float4(color, 1.0), prev, float(sampleIndex) / float(sampleIndex + 1));
         accumTex.write(blended, gid);
@@ -384,7 +463,7 @@ public struct ShaderSource {
         float3 a = col * (col + 0.0245786) - 0.000090537;
         float3 b = col * (0.983729 * col + 0.4329510) + 0.238081;
         float3 mapped = clamp(a / b, 0.0, 1.0);
-        
+
         // Gamma 2.2 correction for sRGB display
         mapped = pow(mapped, float3(1.0 / 2.2));
 

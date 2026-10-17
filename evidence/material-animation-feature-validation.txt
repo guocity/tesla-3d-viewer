@@ -1,0 +1,14 @@
+Tesla Metal Viewer initializing on: Apple M4
+Feature checks passed: cybertruck, 3 clear lens surfaces
+Feature checks passed: model3_high, 2 clear lens surfaces
+Feature checks passed: modely_high, 2 clear lens surfaces
+Feature checks passed: models_plaid, 4 clear lens surfaces
+Feature checks passed: modelx_plaid, 3 clear lens surfaces
+Feature checks passed: semi, 1 clear lens surfaces
+Feature checks passed: bayberry, 2 clear lens surfaces
+Feature checks passed: bayberry_e41, 1 clear lens surfaces
+Feature checks passed: bayberry_e80, 1 clear lens surfaces
+Feature checks passed: poppyseed, 2 clear lens surfaces
+Feature checks passed: models_legacy, 2 clear lens surfaces
+Feature checks passed: modelx_legacy, 2 clear lens surfaces
+Feature validation failures: []

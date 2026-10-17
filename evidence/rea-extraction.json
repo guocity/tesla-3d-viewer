@@ -1,0 +1,36 @@
+[
+  {
+    "evidence_id": "ev_7d91c075791c2e791020596446fff5a89e42a3e79509b51ee06da4725adf7b97",
+    "provider": {
+      "id": "rea-artifact-graph",
+      "name": "REA safe artifact graph provider",
+      "version": "1"
+    },
+    "operation": "extract_artifact",
+    "subject": {
+      "name": "com.teslamotors.tesla_4.61.6-4647-4647_1arch_7dpi_24lang_1feat_15e99b04241942c48c066c4afe62f5d9_apkmirror.com.apkm",
+      "digest": {
+        "sha256": "ad3b058c538663feb52dbefffdcce8b8b6c35a8eecc39777a738af5d7e049a97"
+      }
+    },
+    "integrity_contradictions": [],
+    "containment_verified": true
+  },
+  {
+    "evidence_id": "ev_3dbc4db8befd4bfe7fe2e2fe19a806c1d1e86c03ec9120a00557719180e27986",
+    "provider": {
+      "id": "rea-artifact-graph",
+      "name": "REA safe artifact graph provider",
+      "version": "1"
+    },
+    "operation": "extract_artifact",
+    "subject": {
+      "name": "split_assets_pack.apk",
+      "digest": {
+        "sha256": "b1910c2f91a34f74c96a22635d18e755e30a239e2be8e928fbff8e5c71903639"
+      }
+    },
+    "integrity_contradictions": [],
+    "containment_verified": true
+  }
+]

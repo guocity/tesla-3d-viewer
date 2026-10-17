@@ -35,10 +35,10 @@ public class AppState: ObservableObject {
         didSet { onMaterialChanged?() }
     }
     
-    @Published public var groundReflectivity: Float = 0.75 {
+    @Published public var groundReflectivity: Float = 0.25 {
         didSet { onMaterialChanged?() }
     }
-    @Published public var groundRoughness: Float = 0.06 {
+    @Published public var groundRoughness: Float = 0.18 {
         didSet { onMaterialChanged?() }
     }
     
@@ -46,7 +46,7 @@ public class AppState: ObservableObject {
     @Published public var isPrivacyTintEnabled: Bool = false {
         didSet { onMaterialChanged?() }
     }
-    @Published public var privacyTintDarkness: Float = 0.75 {
+    @Published public var privacyTintDarkness: Float = 0.4 {
         didSet { onMaterialChanged?() }
     }
     
@@ -57,7 +57,12 @@ public class AppState: ObservableObject {
     // Cinematic Showcase Car Tour
     @Published public var isTouring: Bool = false {
         didSet {
-            if isTouring { isTurntable = false }
+            if isTouring {
+                isTurntable = false
+                camera.tourTime = 0
+                tourProgress = 0
+                tourStageName = Camera.tourWaypoints[0].name
+            }
             onMaterialChanged?()
         }
     }
@@ -78,6 +83,48 @@ public class AppState: ObservableObject {
     @Published public var totalVertices: Int = 0
     @Published public var isInteracting: Bool = false
     
+    @Published public var animations: [SourceAnimation] = []
+    @Published public var selectedAnimations: Set<String> = [] {
+        didSet {
+            animationTime = min(animationTime, animationDuration)
+            if selectedAnimations.isEmpty { isPlayingAnimation = false; animationTime = 0 }
+        }
+    }
+    @Published public var animationTime: Float = 0
+    @Published public var isPlayingAnimation = false
+    @Published public var loadError: String?
+    public var animationDuration: Float {
+        animations.filter { selectedAnimations.contains($0.name) }.map(\.duration).max() ?? 1
+    }
+
+    public func setAnimation(_ name: String, enabled: Bool) {
+        guard let clip = animations.first(where: { $0.name == name }) else { return }
+        if !enabled { selectedAnimations.remove(name); return }
+        // A transform track owns all channels; value tracks own their individual channel.
+        func overlaps(_ lhs: SourceAnimation, _ rhs: SourceAnimation) -> Bool {
+            lhs.tracks.contains { a in rhs.tracks.contains { b in
+                guard let an = a["node"] as? Int, let bn = b["node"] as? Int, an == bn else { return false }
+                if a["type"] as? String == "transform" || b["type"] as? String == "transform" { return true }
+                return (a["target"] as? String)?.split(separator: ":").last == (b["target"] as? String)?.split(separator: ":").last
+            } }
+        }
+        let conflicting = animations.filter { selectedAnimations.contains($0.name) && overlaps(clip,$0) }.map(\.name)
+        var selection = selectedAnimations.subtracting(conflicting)
+        selection.insert(name)
+        selectedAnimations = selection
+    }
+
+    public func toggleAnimationPlayback() {
+        guard !selectedAnimations.isEmpty else { return }
+        if !isPlayingAnimation && animationTime >= animationDuration { animationTime = 0 }
+        isPlayingAnimation.toggle()
+    }
+    @Published public var isDriving = false { didSet { if isDriving { isCharging = false } } }
+    @Published public var drivingSpeed: Float = 30
+    @Published public var climateMode: Float = 0
+    @Published public var isCharging = false { didSet { if isCharging { isDriving = false } } }
+    @Published public var supportsClimate = false
+    @Published public var supportsCharging = false
     public let camera = Camera()
     
     public var onModelChanged: (() -> Void)?
@@ -85,6 +132,12 @@ public class AppState: ObservableObject {
     
     public init() {}
     
+    public func nextModel() -> TeslaCarModel {
+        let models = TeslaCatalog.models
+        let index = models.firstIndex(where: { $0.id == selectedModel.id }) ?? 0
+        return models[(index + 1) % models.count]
+    }
+
     public func selectModel(_ model: TeslaCarModel) {
         selectedModel = model
         let defaultPaint = TeslaCatalog.paints[model.defaultPaintIndex]
@@ -93,9 +146,8 @@ public class AppState: ObservableObject {
         roughness = defaultPaint.roughness
         clearcoat = defaultPaint.clearcoat
         
-        // Model Y and Model X feature factory dark privacy glass for rear windows & roof
-        let isSUV = model.id.contains("modely") || model.id.contains("bayberry") || model.id.contains("modelx")
-        isPrivacyTintEnabled = isSUV ? true : isPrivacyTintEnabled
+        // Start with optically clear windows; privacy tint remains an explicit choice.
+        isPrivacyTintEnabled = false
         
         onMaterialChanged?()
     }

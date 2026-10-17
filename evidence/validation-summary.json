@@ -1,0 +1,36 @@
+{
+  "vehicles": 12,
+  "usableSourceClips": 161,
+  "sourceTracks": 252,
+  "nativeBuild": "release passed",
+  "visibleMotionChecks": "passed for every exported clip",
+  "gpuExports": "passed for every vehicle",
+  "hardware": "Apple M4",
+  "uiAutomation": "Unavailable: desktop automation native pipe closed before response",
+  "sourceRebuild": "APKM and nested asset-pack extracted using REA; standalone rebuild completed",
+  "followUpFeatures": {
+    "clearLightLenses": "passed across 12 models",
+    "matteRubber": "passed across 12 models",
+    "simultaneousAnimationPoses": "passed across 12 models",
+    "conflictingClipSelection": "passed",
+    "playbackRestart": "passed",
+    "tourMotion": "passed across 12 models",
+    "individualClipRegression": "161 clips passed",
+    "gpuPreviews": [
+      "previews/clear-headlamps.png",
+      "previews/multiple-animations.png"
+    ]
+  },
+  "navigationSuspensionFollowUp": {
+    "suspension": "all four tires grounded at every source keyframe; body rises 215 mm",
+    "windows": "neutral optical transmission; privacy tint optional",
+    "navigation": "two-finger orbit, Shift pan, pinch zoom, middle-drag orbit; routing and perspective pan checks passed",
+    "nextModel": "all 12 transitions including wrap passed",
+    "animationRegression": "161 clips passed",
+    "gpuPreviews": [
+      "previews/suspension-low.png",
+      "previews/suspension-high.png",
+      "previews/clear-windows.png"
+    ]
+  }
+}

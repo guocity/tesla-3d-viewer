@@ -98,43 +98,43 @@ public struct TeslaCatalog {
     public static let models: [TeslaCarModel] = [
         TeslaCarModel(
             id: "cybertruck",
-            name: "Cybertruck Cyberbeast",
+            name: "Cybertruck",
             subtitle: "Tri-Motor AWD • Stainless Steel Exoskeleton",
             filename: "cybertruck.glb",
             defaultPaintIndex: 0,
-            specs: ["0–60": "2.6 s", "Top Speed": "130 mph", "Power": "845 hp", "Range": "320 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "model3_high",
-            name: "Model 3",
+            name: "Model 3 · 3_High",
             subtitle: "Dual Motor AWD • All-Electric Performance Sedan",
             filename: "model3_high.glb",
             defaultPaintIndex: 2,
-            specs: ["0–60": "2.9 s", "Top Speed": "163 mph", "Power": "510 hp", "Range": "341 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "modely_high",
-            name: "Model Y",
+            name: "Model Y · Y_High",
             subtitle: "Compact SUV • Long Range All-Wheel Drive",
             filename: "modely_high.glb",
             defaultPaintIndex: 1,
-            specs: ["0–60": "3.5 s", "Top Speed": "155 mph", "Power": "456 hp", "Range": "310 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "models_plaid",
-            name: "Model S Plaid",
+            name: "Model S · Palladium",
             subtitle: "Tri-Motor Palladium • Carbon-Sleeve Rotors",
             filename: "models_plaid.glb",
             defaultPaintIndex: 1,
-            specs: ["0–60": "1.99 s", "Top Speed": "200 mph", "Power": "1,020 hp", "Range": "359 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "modelx_plaid",
-            name: "Model X Plaid",
+            name: "Model X · Palladium",
             subtitle: "Tri-Motor SUV • Falcon Wing Doors",
             filename: "modelx_plaid.glb",
             defaultPaintIndex: 3,
-            specs: ["0–60": "2.5 s", "Top Speed": "163 mph", "Power": "1,020 hp", "Range": "326 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "semi",
@@ -142,55 +142,55 @@ public struct TeslaCatalog {
             subtitle: "Class 8 Heavy Duty • Tri-Motor Independent Axles",
             filename: "semi.glb",
             defaultPaintIndex: 5,
-            specs: ["0–60 (Loaded)": "20 s", "Top Speed": "65 mph", "Consumption": "<2 kWh/mi", "Range": "500 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "bayberry",
-            name: "Model Y (Refresh)",
+            name: "Model Y · Bayberry",
             subtitle: "Refreshed All-Electric Mid-Size SUV",
             filename: "bayberry.glb",
             defaultPaintIndex: 4,
-            specs: ["0–60": "3.2 s", "Top Speed": "160 mph", "Aero Cd": "0.219", "Range": "350 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "bayberry_e41",
-            name: "Model Y Refresh (E41 Aero)",
-            subtitle: "High-Downforce Package • Aero Diffusers",
+            name: "Bayberry E41",
+            subtitle: "APK source variant: Ego/BayberryE41",
             filename: "bayberry_e41.glb",
             defaultPaintIndex: 2,
-            specs: ["0–60": "3.1 s", "Top Speed": "165 mph", "Aero Cd": "0.225", "Range": "345 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "bayberry_e80",
-            name: "Model Y Refresh (E80 LWB)",
-            subtitle: "Extended Wheelbase Performance Variant",
+            name: "Bayberry E80",
+            subtitle: "APK source variant: Ego/BayberryE80",
             filename: "bayberry_e80.glb",
             defaultPaintIndex: 7,
-            specs: ["0–60": "2.8 s", "Top Speed": "175 mph", "Power": "680 hp", "Range": "360 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "poppyseed",
-            name: "Model 3 (Refresh)",
+            name: "Model 3 · Poppyseed",
             subtitle: "Refreshed All-Electric Performance Sedan",
             filename: "poppyseed.glb",
             defaultPaintIndex: 2,
-            specs: ["0–60": "3.8 s", "Top Speed": "140 mph", "Efficiency": "4.8 mi/kWh", "Range": "300 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "models_legacy",
-            name: "Model S (Raven)",
+            name: "Model S · legacy",
             subtitle: "Adaptive Air Suspension • Performance Ludicrous+",
             filename: "models_legacy.glb",
             defaultPaintIndex: 6,
-            specs: ["0–60": "2.3 s", "Top Speed": "163 mph", "Power": "778 hp", "Range": "348 mi"]
+            specs: [:]
         ),
         TeslaCarModel(
             id: "modelx_legacy",
-            name: "Model X (Raven)",
+            name: "Model X · legacy",
             subtitle: "Dual Motor Performance • Active Aero Spoiler",
             filename: "modelx_legacy.glb",
             defaultPaintIndex: 4,
-            specs: ["0–60": "2.7 s", "Top Speed": "155 mph", "Power": "778 hp", "Range": "305 mi"]
+            specs: [:]
         )
     ]
     
@@ -220,6 +220,7 @@ public struct TeslaCatalog {
         // 3. Current working directory & relative paths (for command-line development)
         let currentDir = fileManager.currentDirectoryPath
         let candidates = [
+            "tesla-3d-viewer/models/\(filename)",
             "models/\(filename)",
             "../models/\(filename)",
             "../../models/\(filename)",
