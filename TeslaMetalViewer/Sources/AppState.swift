@@ -21,6 +21,12 @@ public enum WindowTrim: String, CaseIterable, Identifiable {
     public var shaderIndex: Float { Float(Self.allCases.firstIndex(of: self) ?? 0) }
 }
 
+public enum SeatFinish: String, CaseIterable, Identifiable {
+    case original = "Original", whiteVegan = "White vegan"
+    public var id: String { rawValue }
+    public var shaderIndex: Float { self == .whiteVegan ? 1 : 0 }
+}
+
 public class AppState: ObservableObject {
     @Published public var selectedModel: TeslaCarModel = TeslaCatalog.models[0] {
         didSet {
@@ -59,6 +65,7 @@ public class AppState: ObservableObject {
     @Published public var wetness: Float = 0.85 { didSet { onMaterialChanged?() } }
     @Published public var animateWeather = true { didSet { onMaterialChanged?() } }
     @Published public var exposure: Float = 1 { didSet { onMaterialChanged?() } }
+    @Published public var seatFinish: SeatFinish = .original { didSet { onMaterialChanged?() } }
     @Published public var windowTrim: WindowTrim = .source { didSet { onMaterialChanged?() } }
     @Published public var headlightReflection: Float = 0.15 { didSet { onMaterialChanged?() } }
 

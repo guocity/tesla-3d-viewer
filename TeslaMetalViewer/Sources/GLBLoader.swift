@@ -350,13 +350,16 @@ public class GLBLoader {
                         if isCybertruck && ((ex["originalName"] as? String ?? "").lowercased().contains("stainless") || mat["name"] as? String == "paint__Stainless_Steel" || (mat["name"] as? String ?? "").contains("Stainless_Steel")) {
                             geom.textures.w |= 2048
                         }
-                        if category == "glass" || category == "glass_tinted" || category == "glass_clear" {
+                        // Cybertruck's black lamp/tailgate housings are opaque
+                        // source materials despite "Glass" in their resource names.
+                        let opaqueBlackGlass = isCybertruck && (ex["originalName"] as? String ?? "").lowercased().hasPrefix("glass_black")
+                        if !opaqueBlackGlass && (category == "glass" || category == "glass_tinted" || category == "glass_clear") {
                             // Godot alpha-blend colors are not volumetric absorption.
                             // Keep neutral optical transmission; privacy tint is independent.
                             geom.baseColor = SIMD3(0.94,0.97,1)
                             geom.transmission = 0.96
                             geom.metallic = 0; geom.roughness = 0.035
-                            geom.textures = SIMD4(-1,-1,-1,category == "glass_tinted" ? 768 : 256)
+                            geom.textures = SIMD4(-1,-1,-1,(category == "glass_tinted" || geom.sourceMaterial.lowercased().contains("glass_windows_dark")) ? 768 : 256)
                         }
                         let sourceProps = ex["sourceProperties"] as? [String:Any] ?? [:]
                         let cullMode = (sourceProps["params_cull_mode"] as? NSNumber)?.intValue ?? 0
@@ -388,6 +391,16 @@ public class GLBLoader {
                             geom.clearcoat = 0
                             geom.textures.y = -1 // Packed roughness must not polish upholstery.
                             geom.textures.w |= 1048576 // Subdued leather sheen, separate from paint/rubber.
+                        }
+                        // Color only the authored seat upholstery surfaces, not
+                        // seat frames, belts, carpets, or shared dashboard leather.
+                        let seatSurface = category.hasPrefix("interior") &&
+                            (upholsteryName.contains("seat") || (upholstery && paths[i].lowercased().contains("seat"))) &&
+                            !["plastic", "paint", "anodized", "seatbelt", "carpet", "bezel"].contains(where: { upholsteryName.contains($0) })
+                        if seatSurface { geom.textures.w |= 2097152 }
+                        if isCybertruck && original == "decor_white" &&
+                            (paths[i].contains("Dashboard_Decor") || paths[i].contains("Doorcard")) {
+                            geom.textures.w |= 4194304
                         }
                         if (category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light")) && !original.contains("lightbar") {
                             // Godot's dark blend color is not absorption in a clear optical lens.
@@ -455,7 +468,11 @@ public class GLBLoader {
                                 switch role {
                                 case "drl": active = drlOn
                                 case "rear_running", "tail_bar", "parking", "rear_running_center": active = running && !(isCybertruck && role == "tail_bar" && brakeLightsOn); tint = SIMD3(1,0.015,0.005)
-                                case "side_marker": active = running; tint = SIMD3(1,0.28,0.005)
+                                case "side_marker":
+                                    // Cybertruck exports a steady white overlay on
+                                    // the exact same mesh as its front turn fixture.
+                                    // Keep that fixture exclusively under turn input.
+                                    active = running && !isCybertruck; tint = SIMD3(1,0.28,0.005)
                                 case "roofLightbar": active = showRoofLightbar
                                 default: active = false
                                 }
@@ -493,6 +510,18 @@ public class GLBLoader {
                         }
                         trim.textures.w |= 1024
                         scene.geometries.append(trim)
+                    }
+                    if url.lastPathComponent == "models_legacy.glb" && nodes[i]["name"] as? String == "Interior" && geom.sourceMaterial.hasSuffix("/Interior_Black.material") {
+                        let seatVertices = SeatSurfaces.legacyModelSVertices(positions: positions,indices: geom.indices)
+                        let originalIndices = geom.indices
+                        var seats = geom; seats.indices = []; geom.indices = []
+                        for t in stride(from: 0,to: originalIndices.count,by: 3) {
+                            let face = Array(originalIndices[t..<t+3])
+                            if seatVertices.contains(face[0]) { seats.indices += face } else { geom.indices += face }
+                        }
+                        seats.textures.w |= 2097152
+                        seats.componentName += "/Seat upholstery"
+                        if !seats.indices.isEmpty { scene.geometries.append(seats) }
                     }
                     if !geom.indices.isEmpty { scene.geometries.append(geom) }
                 }

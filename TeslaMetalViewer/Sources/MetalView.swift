@@ -161,6 +161,7 @@ public struct MetalViewport: NSViewRepresentable {
             parent.rayTracer.rainIntensity = state.rainIntensity
             parent.rayTracer.wetness = state.wetness
             parent.rayTracer.exposure = state.exposure
+            parent.rayTracer.seatFinish = state.seatFinish
             parent.rayTracer.windowTrim = state.windowTrim
             parent.rayTracer.headlightReflection = state.headlightReflection
             parent.rayTracer.climateMode = state.climateMode

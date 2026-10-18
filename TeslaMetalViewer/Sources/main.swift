@@ -99,6 +99,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if !tourState.isTouring || abs(tourState.camera.tourTime-11.5) > 0.0001 {
                     failures.append(model.id + ": model change interrupted tour")
                 }
+                let seatSurfaces = rest.geometries.filter { ($0.textures.w & 2097152) != 0 }
+                if seatSurfaces.isEmpty { failures.append(model.id + ": missing configurable seat upholstery") }
+                for g in seatSurfaces {
+                    let source = g.sourceMaterial.lowercased()
+                    if g.isPaint != 0 || g.transmission > 0 || ["chrome","seatbelt","carpet","paint_","anodized"].contains(where: { source.contains($0) }) || source.contains("plastic") {
+                        failures.append(model.id + ": white seats include hardware " + g.sourceMaterial)
+                    }
+                }
+                if ["modely_high","modelx_plaid"].contains(model.id) {
+                    let cargo=rest.geometries.filter { $0.componentName.contains("_seater") && ($0.sourceMaterial.contains("Plastic_Black_Seats") || $0.sourceMaterial.contains("Carpet_Seats")) }
+                    if cargo.isEmpty || cargo.contains(where: { ($0.textures.w & 2097152) != 0 }) {
+                        failures.append(model.id + ": white seat finish affects cargo backing or carpet")
+                    }
+                    let upholstery=seatSurfaces.filter { $0.componentName.contains("_seater_Color") }
+                    if upholstery.isEmpty { failures.append(model.id + ": rear seat upholstery/headrests missing white finish") }
+                }
+                let whiteDecor = rest.geometries.filter { ($0.textures.w & 4194304) != 0 }
+                if model.id == "cybertruck" {
+                    if whiteDecor.count != 5 || !whiteDecor.allSatisfy({ $0.sourceMaterial.hasSuffix("Decor_White.material") }) {
+                        failures.append("Cybertruck: white finish must include the dashboard and four door inserts")
+                    }
+                } else if !whiteDecor.isEmpty { failures.append(model.id + ": unintended white interior inserts") }
                 let upholstery = rest.geometries.filter { ($0.textures.w & 1048576) != 0 }
                 if upholstery.isEmpty { failures.append(model.id + ": missing leather upholstery") }
                 for g in upholstery {
@@ -176,6 +198,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if simd_distance(initial,camera.position) < 0.01 { failures.append(model.id + ": tour stationary") }
                 print("Feature checks passed: \(model.id), \(lenses.count) clear lens surfaces")
             }
+            if let visibility=rayTracer.validateCabinOptics() {
+                let expected: [Float]=[0,0.96,0,1,0.96,0.505,0.505*0.505,0]
+                if zip(visibility,expected).contains(where: { abs($0-$1)>0.0001 }) {
+                    failures.append("Cabin shadows/privacy transmission: " + String(describing:visibility))
+                }
+                print("GPU cabin optics (opaque, clear, glass/body, open, duplicate pane, privacy pane, two panes, tinted/body): \(visibility)")
+            } else { failures.append("Cabin optics GPU probe failed") }
             let navigation = InteractiveMTKView.self
             if navigation.action(precise: true,modifiers: [],mode: .orbit) != .orbit ||
                navigation.action(precise: true,modifiers: .shift,mode: .orbit) != .pan ||
@@ -231,7 +260,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let trim=WindowTrim.allCases.first(where: { $0.rawValue.lowercased() == value.lowercased().replacingOccurrences(of: "-",with: " ") }) else { print("Unknown trim: " + value); exit(1) }
                 rayTracer.windowTrim=trim
             }
+            if let value = argument("--seats") {
+                guard let finish = SeatFinish.allCases.first(where: { $0.rawValue.lowercased() == value.lowercased().replacingOccurrences(of: "-",with: " ") }) else {
+                    print("Unknown seat finish: " + value); exit(1)
+                }
+                rayTracer.seatFinish = finish
+            }
             if let value=argument("--paint"),let paint=TeslaCatalog.paints.first(where: { $0.id == value }) { appState.selectedPaint=paint }
+            if let value = argument("--privacy-tint") {
+                guard let darkness=Float(value), (0...1).contains(darkness) else { print("Privacy tint must be 0...1"); exit(1) }
+                appState.isPrivacyTintEnabled=true; appState.privacyTintDarkness=darkness
+            }
             rayTracer.exposure = max(0.4,min(2.5,Float(argument("--exposure") ?? "1") ?? 1))
             rayTracer.headlightReflection = max(0,min(1,Float(argument("--lens-reflection") ?? "0.15") ?? 0.15))
             rayTracer.rainIntensity = max(0,min(1,Float(argument("--rain") ?? "0.65") ?? 0.65))
@@ -260,6 +299,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             appState.camera.viewportAspect = 1400.0 / 900.0
             let preset = appState.initialPreset ?? .hero
             appState.camera.applyPreset(preset, radius: radius, center: center)
+            if let zoom=argument("--zoom"),let factor=Float(zoom),factor>0 { appState.camera.distance*=factor }
             if CommandLine.arguments.contains("--rear-straight") {
                 appState.camera.azimuth = -Float.pi/2
                 appState.camera.elevation = 0.10

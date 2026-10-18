@@ -6,7 +6,7 @@ import simd
 public struct GeometryInfoGPU {
     public var emission = SIMD4<Float>(1,1,1,-1)
     public var textures = SIMD4<Int32>(-1,-1,-1,0)
-    public var vertexOffset: UInt32 = 0
+    public var opticalGroup: UInt32 = 0
     public var indexOffset: UInt32 = 0
     public var isGround: UInt32 = 0
     public var isPaint: UInt32 = 0
@@ -26,7 +26,7 @@ public struct UniformsGPU {
     public var materialParams: SIMD4<Float> = .zero
     public var viewport: SIMD4<UInt32> = .zero
     public var tintParams: SIMD4<Float> = .zero
-    public var reservedInterior: SIMD4<Float> = .zero
+    public var interiorFinish: SIMD4<Float> = .zero
     public var rearStrip = SIMD4<Float>(repeating: 0)
     public var rearStripSize = SIMD4<Float>(repeating: 0)
     public var headlampLeft = SIMD4<Float>(repeating: 0)
@@ -165,6 +165,7 @@ public class RayTracer {
         if let scene = currentScene { buildAccelerationStructure(from: scene) }; resetAccumulation()
     } } }
     public var exposure: Float = 1 { didSet { if oldValue != exposure { resetAccumulation() } } }
+    public var seatFinish: SeatFinish = .original { didSet { if oldValue != seatFinish { resetAccumulation() } } }
     public var windowTrim: WindowTrim = .source { didSet { if oldValue != windowTrim { resetAccumulation() } } }
     public var headlightReflection: Float = 0.15 { didSet { if oldValue != headlightReflection { resetAccumulation() } } }
 
@@ -284,7 +285,7 @@ public class RayTracer {
             var info = GeometryInfoGPU()
             info.emission = SIMD4(geom.emissionColor,Float(geom.emissionTexture))
             info.textures = geom.textures
-            info.vertexOffset = vOffset
+            info.opticalGroup = geom.sourceNode >= 0 ? UInt32(geom.sourceNode + 1) : UInt32(geomInfos.count + 1_000_000)
             info.indexOffset = iOffset
             info.isGround = geom.isGround
             info.isPaint = geom.isPaint
@@ -389,6 +390,46 @@ public class RayTracer {
         } catch { print("Climate visibility probe failed: \(error)");return nil }
     }
 
+    /// Real shader regression: solid shadows, clear panes, pane deduplication,
+    /// independent windows and neutral privacy absorption behind glass.
+    public func validateCabinOptics() -> [Float]? {
+        let saved=currentScene
+        defer { if let saved { buildAccelerationStructure(from: saved) } }
+        var scene=ModelSceneData()
+        func pane(_ x: Float, _ z: Float, _ transmission: Float, _ group: Int, tinted: Bool = false) -> GeometryData {
+            var g=GeometryData(); g.transmission=transmission; g.sourceNode=group
+            g.textures.w=tinted ? 768 : 256
+            g.vertices=[SIMD3(x-0.8,-0.8,z),SIMD3(x+0.8,-0.8,z),SIMD3(x,0.8,z)]
+                .map { RaytraceVertex(position: $0,normal: SIMD3(0,0,-1)) }
+            g.indices=[0,1,2]; return g
+        }
+        scene.geometries=[pane(0,0,0,0),pane(2,0,0.96,1),
+            pane(4,0,0.96,2),pane(4,1,0,3),
+            pane(8,0,0.96,4),pane(8,0.005,0.96,4),
+            pane(10,0,0.96,5),pane(10,0.005,0.96,5,tinted:true),
+            pane(12,0,0.96,6,tinted:true),pane(12,1,0.96,7,tinted:true),
+            pane(14,0,0.96,8,tinted:true),pane(14,1,0,9)]
+        buildAccelerationStructure(from:scene)
+        do {
+            let library=try device.makeLibrary(source:ShaderSource.metalRaytracingSource,options:nil)
+            var uniforms=UniformsGPU(); uniforms.tintParams=SIMD4(1,0.505,0.5,0)
+            guard let function=library.makeFunction(name:"cabinOpticsProbe"),
+                  let output=device.makeBuffer(length:8*MemoryLayout<Float>.stride,options:.storageModeShared),
+                  let ub=device.makeBuffer(bytes:&uniforms,length:MemoryLayout<UniformsGPU>.stride,options:.storageModeShared),
+                  let command=commandQueue.makeCommandBuffer(),let encoder=command.makeComputeCommandEncoder() else { return nil }
+            let pipeline=try device.makeComputePipelineState(function:function)
+            encoder.setComputePipelineState(pipeline)
+            encoder.setAccelerationStructure(accelerationStructure,bufferIndex:0)
+            encoder.setBuffer(vertexBuffer,offset:0,index:1); encoder.setBuffer(indexBuffer,offset:0,index:2)
+            encoder.setBuffer(geometryBuffer,offset:0,index:3); encoder.setBuffer(ub,offset:0,index:4)
+            encoder.setBuffer(output,offset:0,index:5)
+            encoder.dispatchThreads(MTLSize(width:8,height:1,depth:1),threadsPerThreadgroup:MTLSize(width:8,height:1,depth:1))
+            encoder.endEncoding();command.commit();command.waitUntilCompleted()
+            guard command.status == .completed else { return nil }
+            return Array(UnsafeBufferPointer(start:output.contents().assumingMemoryBound(to:Float.self),count:8))
+        } catch { print("Cabin optics probe failed: \(error)"); return nil }
+    }
+
     public func resetAccumulation() {
         sampleIndex = 0
         isDirty = true
@@ -469,13 +510,14 @@ public class RayTracer {
         let viewMat = camera.viewMatrix()
         let projMat = camera.projectionMatrix(aspect: aspect)
 
-        let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
+        let tintTrans = 0.96 * (1.0 - privacyTintDarkness) + 0.05 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
         let beamsActive: Float = (headlightsOn && showLightBeams) ? 1.0 : 0.0
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,beamsActive)
+        uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
@@ -586,12 +628,13 @@ public class RayTracer {
         let aspect = Float(w) / Float(h)
         let viewMat = camera.viewMatrix()
         let projMat = camera.projectionMatrix(aspect: aspect)
-        let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
+        let tintTrans = 0.96 * (1.0 - privacyTintDarkness) + 0.05 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,(headlightsOn && showLightBeams) ? 1 : 0)
+        uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)

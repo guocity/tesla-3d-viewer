@@ -65,6 +65,17 @@ enum LightingValidation {
             if off.geometries.contains(where: { $0.lightRole != nil && $0.emissive != 0 }) {
                 failures.append(model.id + ": managed lamp still emits when switched off")
             }
+            if model.id == "cybertruck" {
+                if let running=GLBLoader.loadModel(from:url,device:device) {
+                    for g in running.geometries where g.lightRole == "side_marker" || g.lightRole == "turn_left" || g.lightRole == "turn_right" {
+                        if g.emissive != 0 { failures.append("Cybertruck: front turn fixture lit without turn input: " + g.componentName) }
+                    }
+                }
+                let blackHousings=off.geometries.filter { $0.sourceMaterial.lowercased().contains("/glass_black") }
+                if blackHousings.isEmpty || blackHousings.contains(where: { $0.transmission != 0 || ($0.textures.w & 256) != 0 }) {
+                    failures.append("Cybertruck: black tailgate/lamp housings transmit light")
+                }
+            }
             if model.id == "models_plaid" {
                 let tires = off.geometries.filter { $0.sourceMaterial.contains("Tire_Palladium") }
                 if tires.count != 4 || tires.contains(where: { $0.textures.x < 0 }) { failures.append("Model S: missing four source tire textures") }

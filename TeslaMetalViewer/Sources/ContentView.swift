@@ -120,7 +120,22 @@ public struct ContentView: View {
                                 }
                                 control("Headlight reflection", value: $state.headlightReflection, range: 0...1)
                                 Toggle("Privacy tint override", isOn: $state.isPrivacyTintEnabled)
-                                if state.isPrivacyTintEnabled { control("Tint", value: $state.privacyTintDarkness, range: 0...1) }
+                                if state.isPrivacyTintEnabled {
+                                    control("Darkness", value: $state.privacyTintDarkness, range: 0...1)
+                                    Text("Applies to privacy windows and roof glass. Front windows stay clear.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }.padding(8)
+                        }
+                        GroupBox("Interior") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Picker("Seats", selection: $state.seatFinish) {
+                                    ForEach(SeatFinish.allCases) { Text($0.rawValue).tag($0) }
+                                }
+                                Text(state.selectedModel.id == "cybertruck"
+                                     ? "White vegan seats include matching white dashboard and door inserts."
+                                     : "White vegan upholstery with a soft matte finish.")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }.padding(8)
                         }
                         GroupBox("Camera tour") {

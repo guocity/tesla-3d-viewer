@@ -18,7 +18,7 @@ public struct ShaderSource {
     struct GeometryInfo {
         float4 emission; // independent emission tint, texture index
         int4 textures;
-        uint vertexOffset;
+        uint opticalGroup;
         uint indexOffset;
         uint isGround;
         uint isPaint;
@@ -39,7 +39,7 @@ public struct ShaderSource {
         float4 params;
         uint4 viewport;
         float4 tintParams;
-        float4 reservedInterior;
+        float4 interiorFinish;
         float4 rearStrip;
         float4 rearStripSize;
         float4 headlampLeft;
@@ -177,7 +177,17 @@ public struct ShaderSource {
         return bg + float3(0.05,0.055,0.065)*pow(max(y,0.0),3.0);
     }
 
-    static void applyTrim(thread GeometryInfo &mat, constant Uniforms &uniforms) {
+    static void applyFinish(thread GeometryInfo &mat, constant Uniforms &uniforms) {
+        if (uniforms.interiorFinish.x > 0.5 && (mat.textures.w & (2097152 | 4194304)) != 0) {
+            bool seat = (mat.textures.w & 2097152) != 0;
+            mat.baseColor = float4(0.82,0.84,0.86,0.0);
+            mat.params.x = seat ? 0.84 : 0.78;
+            mat.params.y = 0.0;
+            // The source black albedo atlas would darken a white color override.
+            // Keep the separate source AO, UVs and geometry intact.
+            mat.textures.x = -1; mat.textures.y = -1;
+            if (seat) mat.textures.w |= 1048576;
+        }
         if ((mat.textures.w & 1024) == 0 || uniforms.renderOptions.z < 0.5) return;
         bool chrome = uniforms.renderOptions.z < 1.5;
         mat.baseColor = chrome ? float4(0.82,0.85,0.89,1.0) : float4(0.012,0.015,0.018,0.0);
@@ -234,7 +244,7 @@ public struct ShaderSource {
     static float3 surfaceRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float4 uv,
                                   constant Uniforms &u, array<texture2d<float>,32> textures) {
         constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
-        applyTrim(mat,u);
+        applyFinish(mat,u);
         float3 base=mat.isPaint==1 ? u.carPaintColor.xyz : mat.baseColor.xyz;
         if (mat.textures.x>=0 && (mat.textures.w & 16)==0)
             base*=pow(max(textures[mat.textures.x].sample(smp,uv.xy).rgb,0.0),float3(2.2));
@@ -311,6 +321,51 @@ public struct ShaderSource {
         return h;
     }
 
+    static float opticalTransmission(GeometryInfo m, constant Uniforms &u) {
+        if (m.params.w <= 0.01) return 0.0;
+        return (m.textures.w & 512)!=0 && u.tintParams.x > 0.5 ? u.tintParams.y : m.params.w;
+    }
+    // Several source surfaces describe the two sides of one pane. Absorption
+    // belongs to that pane once; another window farther along the ray adds its own.
+    static float paneAttenuation(GeometryInfo m, float distance, constant Uniforms &u,
+                                  thread uint &group, thread float &paneTransmission) {
+        float t=opticalTransmission(m,u);
+        if (m.opticalGroup==group && distance<0.04) {
+            float next=min(paneTransmission,t);
+            float factor=next/max(paneTransmission,0.0001);
+            paneTransmission=next; return factor;
+        }
+        group=m.opticalGroup; paneTransmission=t; return t;
+    }
+    static float lightVisibility(ray r, primitive_acceleration_structure accel,
+                                 device const Vertex *vertices, device const uint *indices,
+                                 constant GeometryInfo *geometries, constant Uniforms &u) {
+        float visibility=1.0, paneTransmission=1.0;
+        uint group=0xffffffffu;
+        for (int layer=0;layer<24;++layer) {
+            auto h=intersectVisible(r,accel,vertices,indices,geometries,u);
+            if (h.type!=intersection_type::triangle) return visibility;
+            GeometryInfo m=geometries[h.geometry_id];
+            if (m.params.w<=0.01) return 0.0;
+            visibility*=paneAttenuation(m,h.distance,u,group,paneTransmission);
+            float step=h.distance+0.0004;
+            r.origin+=r.direction*step; r.max_distance-=step; r.min_distance=0.0002;
+            if (r.max_distance<=r.min_distance) return visibility;
+        }
+        return 0.0;
+    }
+
+    kernel void cabinOpticsProbe(
+        primitive_acceleration_structure accel [[buffer(0)]],
+        device const Vertex *vertices [[buffer(1)]], device const uint *indices [[buffer(2)]],
+        constant GeometryInfo *geometries [[buffer(3)]], constant Uniforms &u [[buffer(4)]],
+        device float *results [[buffer(5)]], uint id [[thread_position_in_grid]]) {
+        if (id>=8) return;
+        ray r; r.origin=float3(float(id)*2.0,0,-2); r.direction=float3(0,0,1);
+        r.min_distance=0.0002; r.max_distance=4.0;
+        results[id]=lightVisibility(r,accel,vertices,indices,geometries,u);
+    }
+
     // ------------------------------------------------------------------
     // Physically based sampling helpers
     // ------------------------------------------------------------------
@@ -354,7 +409,7 @@ public struct ShaderSource {
         auto h = intersectVisible(r,accel,vertices,indices,geometries,u);
         if (h.type != intersection_type::triangle) return sampleEnvironment(dir,u.renderOptions.x);
         GeometryInfo m = geometries[h.geometry_id];
-        applyTrim(m,u);
+        applyFinish(m,u);
         Lighting l = lightingForPreset(u.renderOptions.x);
         if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.25);
         float4 uv; float3 n = hitNormal(h,m,vertices,indices,dir,uv);
@@ -368,12 +423,23 @@ public struct ShaderSource {
                                   array<texture2d<float>,32> textures) {
         ray r; r.origin = origin; r.direction = dir; r.min_distance = 0.004; r.max_distance = 6.0;
         auto h = intersectVisible(r,accel,vertices,indices,geometries,u);
-        if (h.type != intersection_type::triangle) return sampleEnvironment(dir,u.renderOptions.x);
+        float transmission=1.0,paneTransmission=1.0;
+        uint group=0xffffffffu;
+        for (int layer=0;layer<24 && h.type==intersection_type::triangle;++layer) {
+            GeometryInfo glass=geometries[h.geometry_id];
+            if (glass.params.w<=0.01) break;
+            transmission*=paneAttenuation(glass,h.distance,u,group,paneTransmission);
+            float step=h.distance+0.0004;
+            r.origin+=dir*step; r.max_distance-=step; r.min_distance=0.0002;
+            if (r.max_distance<=r.min_distance) return float3(0);
+            h=intersectVisible(r,accel,vertices,indices,geometries,u);
+        }
+        if (h.type != intersection_type::triangle) return sampleEnvironment(dir,u.renderOptions.x)*transmission;
         GeometryInfo m = geometries[h.geometry_id];
-        applyTrim(m,u);
+        if (m.params.w>0.01) return float3(0);
+        applyFinish(m,u);
         Lighting l = lightingForPreset(u.renderOptions.x);
-        if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.12);
-        if (m.params.w > 0.3) return sampleEnvironment(dir,u.renderOptions.x)*m.params.w*0.7;
+        if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.12)*transmission;
         float3 base = m.isPaint == 1 ? u.carPaintColor.xyz : m.baseColor.xyz;
         float3 bounce = base*l.ambientColor*0.35;
         if (m.isGround == 4) bounce += base*m.params.z;
@@ -381,7 +447,15 @@ public struct ShaderSource {
             float4 uv; hitNormal(h,m,vertices,indices,dir,uv);
             bounce += emittedLight(m,uv,textures,u);
         }
-        return bounce;
+        return bounce*transmission;
+    }
+
+    // Source AO supplies stable upholstery contact shading. The matte diffuse
+    // fill avoids stochastic glossy/indirect rays; direct light still casts
+    // transparent, area-sampled shadows through the real scene geometry.
+    static float3 matteIrradiance(float3 n, constant Uniforms &u) {
+        Lighting l=lightingForPreset(u.renderOptions.x);
+        return l.ambientColor*(0.75+0.25*max(n.y,0.0));
     }
 
     kernel void raytraceKernel(
@@ -431,7 +505,7 @@ public struct ShaderSource {
             uint geomId = hit.geometry_id;
             uint primId = hit.primitive_id;
             GeometryInfo mat = geometries[geomId];
-            applyTrim(mat,uniforms);
+            applyFinish(mat,uniforms);
 
             // Global indices lookup
             uint i0 = indices[mat.indexOffset + primId * 3 + 0];
@@ -495,9 +569,7 @@ public struct ShaderSource {
             shadowRay.min_distance = 0.01;
             shadowRay.max_distance = length(keyLightPos - hitPos);
 
-            typename intersector<triangle_data>::result_type shadowHit = intersectVisible(shadowRay,accel,vertices,indices,geometries,uniforms);
-            // Fill inside shadows now comes from ray-traced sky/bounce lighting.
-            float shadow = (shadowHit.type == intersection_type::none) ? 1.0 : 0.0;
+            float shadow = mat.params.w>0.01 ? 1.0 : lightVisibility(shadowRay,accel,vertices,indices,geometries,uniforms);
 
             if (mat.isGround == 1) {
                 // ============================================================
@@ -559,7 +631,7 @@ public struct ShaderSource {
 
                 if (carHit.type == intersection_type::triangle) {
                     GeometryInfo carMat = geometries[carHit.geometry_id];
-                    applyTrim(carMat,uniforms);
+                    applyFinish(carMat,uniforms);
                     uint ci0 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 0];
                     uint ci1 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 1];
                     uint ci2 = indices[carMat.indexOffset + carHit.primitive_id * 3 + 2];
@@ -602,15 +674,7 @@ public struct ShaderSource {
                 float transmission = mat.params.w;
                 float3 glassTint = mat.baseColor.xyz;
 
-                // If tinted glass roof or rear privacy windows (Cat 3):
-                if ((mat.textures.w & 512) != 0) {
-                    if (uniforms.tintParams.x > 0.5) {
-                        // Deep factory privacy tint option enabled:
-                        transmission = uniforms.tintParams.y;
-                        float darkness = uniforms.tintParams.z;
-                        glassTint = mix(float3(0.94, 0.97, 1.0), float3(0.65, 0.72, 0.80), darkness);
-                    }
-                }
+                transmission = opticalTransmission(mat,uniforms);
 
                 float3 viewDir = -rayDir;
                 float NdotV = max(dot(normal, viewDir), 0.0);
@@ -631,7 +695,7 @@ public struct ShaderSource {
                 float3 reflColor = sampleEnvironment(reflDir,uniforms.renderOptions.x);
                 if (reflHit.type == intersection_type::triangle) {
                     GeometryInfo rMat = geometries[reflHit.geometry_id];
-                    applyTrim(rMat,uniforms);
+                    applyFinish(rMat,uniforms);
                     uint ri=rMat.indexOffset+reflHit.primitive_id*3;
                     Vertex ra=vertices[indices[ri]], rb=vertices[indices[ri+1]], rc=vertices[indices[ri+2]];
                     float2 bary=reflHit.triangle_barycentric_coord; float rw=1.0-bary.x-bary.y;
@@ -652,17 +716,20 @@ public struct ShaderSource {
 
                 typename intersector<triangle_data>::result_type transHit = intersectVisible(transRay,accel,vertices,indices,geometries,uniforms);
                 float3 transColor = sampleEnvironment(rayDir,uniforms.renderOptions.x);
-                // Traverse both lens interfaces and any nested clear covers before shading.
+                uint paneGroup=mat.opticalGroup;
+                float paneTransmission=transmission;
+                // Traverse glass interfaces, retaining each pane's neutral absorption.
                 // Shading a second glass hit as opaque made layered headlamps look black.
-                for (int layer = 0; layer < 8; ++layer) {
+                for (int layer = 0; layer < 24; ++layer) {
                     if (transHit.type != intersection_type::triangle || geometries[transHit.geometry_id].params.w <= 0.01) break;
+                    transmission *= paneAttenuation(geometries[transHit.geometry_id],transHit.distance,uniforms,paneGroup,paneTransmission);
                     transRay.origin += rayDir * (transHit.distance + 0.0004);
                     transHit = intersectVisible(transRay,accel,vertices,indices,geometries,uniforms);
                 }
 
-                if (transHit.type == intersection_type::triangle) {
+                if (transHit.type == intersection_type::triangle && geometries[transHit.geometry_id].params.w<=0.01) {
                     GeometryInfo tMat = geometries[transHit.geometry_id];
-                    applyTrim(tMat,uniforms);
+                    applyFinish(tMat,uniforms);
                     uint ti0 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 0];
                     uint ti1 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 1];
                     uint ti2 = indices[tMat.indexOffset + transHit.primitive_id * 3 + 2];
@@ -695,14 +762,31 @@ public struct ShaderSource {
                         float3 innerRefl = reflect(rayDir, tn);
                         transColor = sampleEnvironment(innerRefl,uniforms.renderOptions.x) * tBase * (0.8 + 0.5 * tNdotL);
                     } else {
-                        // Cabin seats, dashboard, steering wheel
-                        float3 interiorAmbient = tBase * lighting.ambientColor;
-                        float3 interiorDiffuse = tBase * tNdotL * lighting.keyColor * 0.5;
-                        transColor = interiorAmbient + interiorDiffuse;
+                        // Shade the actual cabin surface with the same visibility
+                        // and occluded diffuse bounce used when viewed directly.
+                        ray cabinShadow;
+                        cabinShadow.origin=tHitPos+tn*0.003;
+                        bool matte=(tMat.textures.w & 1048576)!=0;
+                        float3 cabinKey=keyLightPos;
+                        cabinShadow.direction=normalize(cabinKey-tHitPos);
+                        cabinShadow.min_distance=0.0002;
+                        cabinShadow.max_distance=length(cabinKey-tHitPos);
+                        float visibility=lightVisibility(cabinShadow,accel,vertices,indices,geometries,uniforms);
+                        float4 cabinUV=tw*vertices[ti0].uv+tb.x*vertices[ti1].uv+tb.y*vertices[ti2].uv;
+                        float ao=1.0;
+                        if (tMat.textures.z>=0) {
+                            float4 sourceAO=sourceTextures[tMat.textures.z].sample(materialSampler,(tMat.textures.w & 32)!=0 ? cabinUV.zw : cabinUV.xy);
+                            ao=sourceAO[tMat.textures.w & 3];
+                        }
+                        float3 gi=matte ? matteIrradiance(tn,uniforms)
+                            : traceIrradiance(tHitPos+tn*0.003,sampleCosine(tn,seed),accel,vertices,indices,geometries,uniforms,sourceTextures);
+                        transColor=directBRDF(tn,viewDir,normalize(cabinKey-tHitPos),tBase,tMetallic,max(tMat.params.x,areaRoughness))*lighting.keyColor*visibility
+                            +tBase*(1.0-tMetallic)*min(gi,float3(2.5))*ao;
                     }
                     transColor += rearPanelLight(tHitPos,tn,viewDir,tBase,tMetallic,tMat.params.x,uniforms);
                 }
 
+                if (transHit.type==intersection_type::triangle && geometries[transHit.geometry_id].params.w>0.01) transColor=float3(0);
                 // Attenuate transmitted color by glass tint
                 transColor *= glassTint;
 
@@ -711,12 +795,10 @@ public struct ShaderSource {
                 float NdotH = max(dot(normal, halfDir), 0.0);
                 float glassSpec = pow(NdotH, 256.0) * ((mat.textures.w & 64) != 0 ? 0.06*uniforms.renderOptions.w : 0.18);
 
-                // Physical mix: transmitted light vs reflected light according to Fresnel
-                float3 glassBlend = mix(transColor, reflColor, fresnel);
-
-                // If transmission < 1.0, blend between opaque surface and transmitted glass
-                float3 opaqueLook = glassTint * 0.1 + reflColor * fresnel;
-                color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec) + emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms);
+                // Tint absorbs transmitted light; it does not turn glass into
+                // an opaque blue/gray surface or dim the front-surface reflection.
+                color = transColor*transmission*(1.0-fresnel)+reflColor*fresnel
+                    +float3(glassSpec)+emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms);
             } else {
                 // ============================================================
                 // METALLIC CAR BODY & TESLA DETAILS
@@ -767,7 +849,7 @@ public struct ShaderSource {
                     // Fine, restrained grain keeps broad leather highlights soft.
                     float2 grain = float2(noise2(hitPos.xy*950.0+hitPos.z*51.0),
                                           noise2(hitPos.zy*950.0+hitPos.x*47.0))-0.5;
-                    flakeN = normalize(normal+(tangent*grain.x+bitangent*grain.y)*0.045);
+                    flakeN = normalize(normal+(tangent*grain.x+bitangent*grain.y)*0.018);
                     baseRough = max(0.82,roughness);
                 } else if (isStainlessSteel) {
                     float grain = (noise2(hitPos.xz*450.0 + hitPos.y*120.0) - 0.5)*0.045;
@@ -781,13 +863,15 @@ public struct ShaderSource {
 
                 // Base layer: GGX importance-sampled reflection through the scene.
                 float3 baseDir = sampleGGXReflection(normal, viewDir, max(baseRough, 0.02), seed);
-                float3 baseRefl = traceRadiance(hitPos + normal*0.003, baseDir, 45.0, accel, vertices, indices, geometries, uniforms, sourceTextures);
+                float3 baseRefl = isLeather ? sampleEnvironment(reflect(rayDir,normal),uniforms.renderOptions.x)
+                    : traceRadiance(hitPos + normal*0.003, baseDir, 45.0, accel, vertices, indices, geometries, uniforms, sourceTextures);
                 float3 specBase = baseRefl*envF*mix(1.0, 0.72, baseRough);
 
                 // Diffuse: cosine-sampled sky/bounce ray = real ambient occlusion + GI.
                 float3 giDir = sampleCosine(normal, seed);
                 // Clamp keeps small hot emitters from producing slow-converging speckle.
-                float3 irradiance = min(traceIrradiance(hitPos + normal*0.003, giDir, accel, vertices, indices, geometries, uniforms, sourceTextures), float3(2.5));
+                float3 irradiance = isLeather ? matteIrradiance(normal,uniforms)
+                    : min(traceIrradiance(hitPos + normal*0.003, giDir, accel, vertices, indices, geometries, uniforms, sourceTextures), float3(2.5));
                 float3 diffuseGI = baseCol*(1.0-metallic)*irradiance*materialAO;
                 // Metallic pigment still scatters some colored light under the coat.
                 if (isPaint) diffuseGI += baseCol*metallic*0.18*irradiance*materialAO;
