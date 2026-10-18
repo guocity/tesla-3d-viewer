@@ -1,6 +1,6 @@
 import simd
 
-/// Viewer calibration of authored lamp diffusers and optional cabin accents.
+/// Rear lamp diffuser calibration and indicator timing.
 enum VehicleLighting {
     static func blinkOn(time: Float) -> Bool {
         // 80 flashes/minute, with a short dark interval between flashes.
@@ -153,64 +153,4 @@ enum VehicleLighting {
         }
     }
 
-    static func addCabinAccents(_ scene: inout ModelSceneData, model: String) {
-        guard !model.contains("legacy") && model != "semi.glb" else { return }
-        // Poppyseed has authored LED_Strip surfaces, including articulated doors.
-        guard !scene.geometries.contains(where: { ($0.textures.w & 65536) != 0 }) else { return }
-        let height = scene.boundsMax.y-scene.boundsMin.y
-        let halfWidth = min(scene.boundsMax.z*0.70,0.82)
-        let dashX = scene.boundsMax.x*0.30
-        let dashY = height*0.66
-        let dashParts = scene.geometries.filter {
-            $0.componentName.hasSuffix("/LHD") || $0.componentName.lowercased().contains("dashboard")
-        }
-        var dashSurface: [SIMD4<Float>] = []
-        let frontLimit: Float = scene.boundsMax.x*0.6
-        for g in dashParts {
-            for index in g.indices {
-                let p = g.vertices[Int(index)].position
-                if p.x>dashX-0.10 && p.x<frontLimit && abs(p.y-dashY)<0.07 { dashSurface.append(p) }
-            }
-        }
-        func ribbon(_ points: [SIMD3<Float>], name: String) -> GeometryData {
-            var g = GeometryData(); g.componentName = name
-            g.sourceMaterial = "viewer://cabin-accent"; g.emissive = 1
-            g.emissionColor = SIMD3(repeating: 1); g.roughness = 0.35
-            g.baseColor = SIMD3(repeating: 0.025); g.textures.w |= 65536
-            for i in 0..<(points.count-1) {
-                let a = points[i], b = points[i+1], offset = UInt32(g.vertices.count)
-                let up = SIMD3<Float>(0,0.0025,0)
-                let normal = simd_normalize(SIMD3<Float>(-1,0.2,0))
-                g.vertices += [a-up,b-up,b+up,a+up].map { RaytraceVertex(position: $0,normal: normal) }
-                g.indices += [0,1,2,0,2,3].map { UInt32($0)+offset }
-            }
-            return g
-        }
-        let dash = (0...32).map { i -> SIMD3<Float> in
-            let z = (Float(i)/16-1)*halfWidth
-            let neighbors = dashSurface.filter { abs($0.z-z)<0.045 }
-            let front = neighbors.map(\.x).min().map { $0-0.008 } ?? (dashX-0.12+0.10*(1-pow(z/halfWidth,2)))
-            return SIMD3(front,dashY,z)
-        }
-        scene.geometries.append(ribbon(dash,name: "Cabin accent/Dashboard"))
-        // Fit upper doorcard seams using their posed principal horizontal axis.
-        // This follows the source door's position and yaw when articulated.
-        let cards = Dictionary(grouping: scene.geometries.filter { $0.componentName.lowercased().contains("doorcard") },by: \.componentName)
-        for (name,parts) in cards.sorted(by: { $0.key<$1.key }) {
-            let pts = parts.flatMap { g in g.indices.map { SIMD3(g.vertices[Int($0)].position.x,g.vertices[Int($0)].position.y,g.vertices[Int($0)].position.z) } }
-            guard !pts.isEmpty else { continue }
-            let top = pts.map(\.y).max()!, bottom = pts.map(\.y).min()!
-            let upper = pts.filter { $0.y>top-(top-bottom)*0.18 }
-            guard upper.count>2 else { continue }
-            let c = upper.reduce(SIMD3<Float>(repeating: 0),+)/Float(upper.count)
-            var xx: Float=0, zz: Float=0, xz: Float=0
-            for p in upper { let d=p-c; xx+=d.x*d.x; zz+=d.z*d.z; xz+=d.x*d.z }
-            let angle = 0.5*atan2(2*xz,xx-zz)
-            let axis = SIMD3<Float>(cos(angle),0,sin(angle))
-            let extent = upper.map { simd_dot($0-c,axis) }
-            let a = c+axis*(extent.min()!*0.8)+SIMD3(0,-0.015,-copysign(0.006,c.z))
-            let b = c+axis*(extent.max()!*0.8)+SIMD3(0,-0.015,-copysign(0.006,c.z))
-            scene.geometries.append(ribbon([a,b],name: "Cabin accent/"+name))
-        }
-    }
 }

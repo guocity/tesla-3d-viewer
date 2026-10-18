@@ -39,7 +39,7 @@ public struct ShaderSource {
         float4 params;
         uint4 viewport;
         float4 tintParams;
-        float4 cabinLight;
+        float4 reservedInterior;
         float4 rearStrip;
         float4 rearStripSize;
         float4 headlampLeft;
@@ -184,7 +184,6 @@ public struct ShaderSource {
                *u.rearStrip.w*down*mask*1.8/(0.012+distance*distance);
     }
     static float3 emittedLight(GeometryInfo mat, float4 uv, array<texture2d<float>,32> textures, constant Uniforms &u) {
-        if ((mat.textures.w & 65536)!=0) return u.cabinLight.rgb*u.cabinLight.w*mat.params.z*2.0;
         uint signals=uint(u.effectParams.w);
         bool indicating=((mat.textures.w & 32768)!=0 && (signals & 2u)!=0)
                       || ((mat.textures.w & 262144)!=0 && (signals & 4u)!=0);
@@ -689,7 +688,6 @@ public struct ShaderSource {
                 direct+=rearPanelLight(hitPos,normal,viewDir,baseCol,metallic,roughness,uniforms);
                 color=(direct+ambient+metalRefl)*(1.0-clearcoat*coatF)+coat*clearcoat
                      +(mat.isGround==3 ? float3(0.0,0.35,1.0)*emissive : (mat.isGround==4 ? baseCol*emissive : emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms)));
-                if ((mat.textures.w & 131072)!=0) color+=baseCol*uniforms.cabinLight.rgb*uniforms.cabinLight.w*0.12;
                 if (uniforms.renderOptions.x>3.5) {
                     // Colored off-camera practicals provide matching neon highlights.
                     float3 cyanDir=normalize(float3(-1,0.24,0.6));

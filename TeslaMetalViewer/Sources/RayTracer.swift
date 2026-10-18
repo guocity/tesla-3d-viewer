@@ -26,7 +26,7 @@ public struct UniformsGPU {
     public var materialParams: SIMD4<Float> = .zero
     public var viewport: SIMD4<UInt32> = .zero
     public var tintParams: SIMD4<Float> = .zero
-    public var cabinLight = SIMD4<Float>(0.03,0.35,1,0.7)
+    public var reservedInterior: SIMD4<Float> = .zero
     public var rearStrip = SIMD4<Float>(repeating: 0)
     public var rearStripSize = SIMD4<Float>(repeating: 0)
     public var headlampLeft = SIMD4<Float>(repeating: 0)
@@ -84,8 +84,6 @@ public class RayTracer {
         }
     }
 
-    public var cabinColor = SIMD3<Float>(0.03,0.35,1) { didSet { if oldValue != cabinColor { resetAccumulation() } } }
-    public var cabinBrightness: Float = 0.7 { didSet { if oldValue != cabinBrightness { resetAccumulation() } } }
     public var signalState: Float {
         Float((VehicleLighting.blinkOn(time: effectTime-signalStartTime) ? 1 : 0) | (turnSignalLeftOn ? 2 : 0) | (turnSignalRightOn ? 4 : 0))
     }
@@ -385,7 +383,6 @@ public class RayTracer {
 
         var uniforms = UniformsGPU()
         let beamsActive: Float = (headlightsOn && showLightBeams) ? 1.0 : 0.0
-        uniforms.cabinLight = SIMD4(cabinColor,cabinBrightness)
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,beamsActive)
@@ -490,7 +487,6 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
-        uniforms.cabinLight = SIMD4(cabinColor,cabinBrightness)
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,(headlightsOn && showLightBeams) ? 1 : 0)

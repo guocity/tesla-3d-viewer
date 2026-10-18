@@ -13,7 +13,7 @@ binary=repo/'TeslaMetalViewer/.build/release/TeslaMetalViewer'
 def render(name,model='bayberry',preset='rear',extra=()):
     target=a.output/(name+'.png')
     subprocess.run([str(binary),'--model',model,'--preset',preset,*(['--paint','solid_black'] if '--paint' not in extra else []),
-                    '--samples','16','--render-out',str(target),*(['--cabin-brightness','0'] if '--cabin-brightness' not in extra else []),*extra],check=True,capture_output=True,text=True)
+                    '--samples','16','--render-out',str(target),*extra],check=True,capture_output=True,text=True)
     return np.asarray(Image.open(target).convert('RGB')).astype(float)
 def amber(im):return ((im[:,:,0]>80)&(im[:,:,1]>35)&(im[:,:,0]>im[:,:,1]*1.2)&(im[:,:,2]<im[:,:,1]*0.5)).sum()
 def red(im):return ((im[:,:,0]>90)&(im[:,:,0]>im[:,:,1]*2+10)&(im[:,:,0]>im[:,:,2]*2+10)).sum()
@@ -60,10 +60,4 @@ for model in ['models_plaid','model3_high']:
     first=render(model+'-brake-on',model,extra=['--brake-lights','--effect-time','0.1'])
     second=render(model+'-brake-later',model,extra=['--brake-lights','--effect-time','0.5'])
     assert np.array_equal(first,second),'Brake-only fixture incorrectly blinks: '+model
-for model in ['bayberry','poppyseed']:
-    blue=render(model+'-cabin-blue',model,'cabin',['--cabin-brightness','1.5','--cabin-color','0066ff'])
-    pink=render(model+'-cabin-pink',model,'cabin',['--cabin-brightness','1.5','--cabin-color','ff0066'])
-    assert ((blue[:,:,2]>blue[:,:,0]*1.8+30)&(blue[:,:,2]>100)).sum()>150,'Blue cabin strip not visible: '+model
-    assert ((pink[:,:,0]>pink[:,:,1]*1.8+30)&(pink[:,:,0]>100)).sum()>150,'Pink cabin strip not visible: '+model
-    assert np.abs(blue-pink).sum()>30000,'Cabin color control has no visible effect'
-print('PASS: all 24 rear indicator/side checks, red Bayberry signals, complete Model S outline, E41 center strip, Cybertruck running/brake circuits, steady brakes, adjustable cabin LEDs.')
+print('PASS: rear indicator checks, red Bayberry signals, complete Model S outline, E41 center strip, Cybertruck running/brake circuits, steady brakes.')

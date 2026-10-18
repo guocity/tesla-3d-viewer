@@ -226,10 +226,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             rayTracer.charging = CommandLine.arguments.contains("--charging")
             rayTracer.effectTime = Float(argument("--effect-time") ?? "2") ?? 2
             rayTracer.weatherTime = rayTracer.effectTime
-            rayTracer.cabinBrightness = max(0,min(3,Float(argument("--cabin-brightness") ?? "0.7") ?? 0.7))
-            if let color = argument("--cabin-color"), color.count == 6, let hex = UInt32(color,radix: 16) {
-                rayTracer.cabinColor = SIMD3(pow(Float((hex>>16)&255)/255,2.2),pow(Float((hex>>8)&255)/255,2.2),pow(Float(hex&255)/255,2.2))
-            }
             rayTracer.drivingSpeed = Float(argument("--driving") ?? "0") ?? 0
             rayTracer.climateMode = Float(argument("--climate") ?? "0") ?? 0
             if let clip = argument("--animation") {
@@ -257,7 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if CommandLine.arguments.contains("--dump-lights"), let scene = rayTracer.currentScene {
                 let vp = appState.camera.projectionMatrix(aspect: 1400.0/900.0) * appState.camera.viewMatrix()
-                for g in scene.geometries where g.lightRole != nil || (g.textures.w & 65536) != 0 {
+                for g in scene.geometries where g.lightRole != nil {
                     var lo = SIMD2<Float>(repeating: .infinity), hi = -lo
                     for i in g.indices {
                         let p = vp * g.vertices[Int(i)].position

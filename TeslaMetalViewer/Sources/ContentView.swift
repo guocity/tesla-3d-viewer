@@ -134,17 +134,6 @@ public struct ContentView: View {
                                 }
                             }.padding(8)
                         }
-                        if !["semi","models_legacy","modelx_legacy"].contains(state.selectedModel.id) {
-                        GroupBox("Cabin accent lighting") {
-                            VStack(alignment: .leading,spacing: 10) {
-                                Toggle("Interior light strips",isOn: $state.cabinLightsOn)
-                                ColorPicker("Strip color",selection: $state.cabinColor,supportsOpacity: false)
-                                control("Brightness",value: $state.cabinBrightness,range: 0...3)
-                                Button("View cabin") { fit(.cabin) }
-                                Text("Uses source LED surfaces when available; added cabin accents are viewer features.").font(.caption).foregroundStyle(.secondary)
-                            }.padding(8)
-                        }
-                        }
                         GroupBox("Scene & atmosphere") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Picker("Scene", selection: $state.lighting) {

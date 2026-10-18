@@ -12,6 +12,11 @@ enum LightingValidation {
                   let off = GLBLoader.loadModel(from: url,device: device,headlightsOn: false,drlOn: false) else {
                 failures.append(model.id + ": load failed"); continue
             }
+            if off.geometries.contains(where: {
+                ($0.textures.w & 65536) != 0 || $0.sourceMaterial.lowercased().contains("led_strip")
+                    || $0.sourceMaterial.lowercased().hasSuffix("/cybertruck/led.material")
+                    || $0.sourceMaterial.hasPrefix("viewer://single-interior")
+            }) { failures.append(model.id + ": interior lightbar remains") }
             let states: [(String,Bool,Bool,Bool,Bool,Bool)] = [
                 ("running",true,true,false,false,false), ("DRL only",false,true,false,false,false),
                 ("braking",false,false,true,false,false), ("left",false,false,false,true,false),

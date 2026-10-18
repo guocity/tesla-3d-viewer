@@ -294,7 +294,6 @@ public class GLBLoader {
                         let ao = bindings["ao"] ?? -1
                         geom.textures = SIMD4(Int32(bindings["albedo"] ?? -1),Int32(bindings["mra"] ?? -1),Int32(ao),Int32(aoChannel | ((ex["customAlbedo"] as? Bool ?? false) ? 16 : 0) | ((ex["aoUV2"] as? Bool ?? false) ? 32 : 0)))
                         let category = ex["category"] as? String ?? ""
-                        if category.hasPrefix("interior") && !url.lastPathComponent.contains("legacy") && url.lastPathComponent != "semi.glb" { geom.textures.w |= 131072 }
                         geom.isPaint = category == "paint" ? 1 : 0
                         geom.clearcoat = category == "paint" ? 1 : 0
                         if isCybertruck && ((ex["originalName"] as? String ?? "").lowercased().contains("stainless") || mat["name"] as? String == "paint__Stainless_Steel" || (mat["name"] as? String ?? "").contains("Stainless_Steel")) {
@@ -357,9 +356,8 @@ public class GLBLoader {
                         for t in stride(from:0,to:geom.indices.count,by:3) { geom.indices.swapAt(t+1,t+2) }
                     }
                     if paths[i].contains("BackfaceCull") { geom.textures.w |= 8192 }
-                    if geom.sourceMaterial.lowercased().contains("led_strip") {
-                        geom.emissionTexture = -1; geom.emissionColor = SIMD3(repeating: 1); geom.emissive = 1
-                        geom.textures.w |= 65536
+                    if geom.sourceMaterial.lowercased().contains("led_strip") || geom.sourceMaterial.lowercased().hasSuffix("/cybertruck/led.material") {
+                        continue // Interior accent strips are disabled on every model.
                     }
                     if effect(i,name:"chargeFlow") { geom.isGround = 3 }
                     // Only actual source emitter surfaces respond to lamp controls. A lamp
@@ -461,7 +459,6 @@ public class GLBLoader {
             let size = restMax-restMin
             scene.boundsMin = restMin-offset; scene.boundsMax = restMax-offset
             scene.center = (restMin+restMax)/2-offset; scene.radius = simd_length(size)/2
-            VehicleLighting.addCabinAccents(&scene,model: url.lastPathComponent)
             scene.totalTriangles = scene.geometries.reduce(0) { $0+$1.indices.count/3 }
             scene.totalVertices = scene.geometries.reduce(0) { $0+$1.vertices.count }
             return scene

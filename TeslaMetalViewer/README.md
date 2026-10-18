@@ -81,21 +81,20 @@ This is a Metal translation of Godot assets and selected runtime shaders, not Te
 
 The legacy browser viewer shares the corrected material metadata and keyframe data; the complete runtime-effect implementation and native inspector are in this Metal app.
 
-## Bayberry optics, blinking indicators and cabin accents
+## Bayberry optics and blinking indicators
 
 Bayberry and E80 retain the authored downward-facing parking emitter. A finite red light wash illuminates the recessed TESLA panel beneath the upper lip, with a narrow vertical falloff that keeps the body below dark. This is an analytic area-light approximation; the parking strip is not replaced by an outward-facing ribbon. Bayberry and E80 rear turn emitters are red. Source variants without dedicated rear indicator geometry use their left/right red brake fixtures, preserving source placement and materials. E41’s coplanar emitter is separated from its optical cover by 2 mm to avoid transmission-ray self-intersection.
 
 Indicators blink at 80 cycles/minute with a 50% duty cycle, start immediately when selected, and share a synchronized clock when both sides are enabled. Brake-only operation stays steady on shared brake/indicator fixtures. Progressive accumulation resets at phase changes to avoid ghosting.
 
-**Cabin accent lighting** provides on/off, a color picker, brightness, and **View cabin**. The refreshed Model 3 uses its actual dashboard/door `LED_Strip` surfaces. Other non-legacy passenger models and Cybertruck use added narrow viewer accent ribbons fitted to the cabin and doorcards; these are customization geometry, not a claim that every extracted trim has factory RGB strips. Exterior paint and trim bindings are untouched.
+Interior lightbars are disabled on every model. Generated bars, source interior LED strips, RGB ambient spill, and interior lighting controls have been removed. Exterior lighting is independent.
 
 ```sh
 .build/release/TeslaMetalViewer --model bayberry --preset rear --signal-left --effect-time 0.1 --render-out /tmp/indicator-on.png
 .build/release/TeslaMetalViewer --model bayberry --preset rear --signal-left --effect-time 0.5 --render-out /tmp/indicator-off.png
-.build/release/TeslaMetalViewer --model poppyseed --preset cabin --cabin-color ff0066 --cabin-brightness 1.5 --render-out /tmp/cabin.png
 python3 ../tools/render_lamp_effects.py
 ```
 
-`tools/render_lamp_effects.py` renders both rear blink phases independently on both sides of all 12 vehicles from directly behind. It checks visible fixture changes on the selected side, rejects opposite-side blinking, and separately checks indirect Bayberry panel lighting, steady brakes and cabin colors. `--rear-straight` selects this diagnostic camera during offscreen export.
+`tools/render_lamp_effects.py` renders both rear blink phases independently on both sides of all 12 vehicles from directly behind. It checks visible fixture changes on the selected side, rejects opposite-side blinking, and separately checks indirect Bayberry panel lighting, steady brakes. `--rear-straight` selects this diagnostic camera during offscreen export.
 
 Rear circuit corrections: E41 exports the hidden authored `Brake_Light` mesh for its outer running circuits and adds a narrow center diffuser fitted to the authored rear panel, because this source trim omits the center emitter. Cybertruck corner lamps split at the continuous running bar’s lower edge: upper running sections stay steady during signaling and turn off together with the upper bar during braking; lower sections carry turn/brake emission. Dark-phase signal overlays transmit rays so Model S’s steady running outline is not covered by a black signal mesh.

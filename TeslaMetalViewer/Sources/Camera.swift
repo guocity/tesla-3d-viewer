@@ -79,8 +79,8 @@ public class Camera {
         
         switch preset {
         case .cabin:
-            target = SIMD3(r*0.30,center.y*1.28,0)
-            azimuth = -Float.pi/2; elevation = 0.04; distance = r*0.5
+            target = SIMD3(-r*0.20,center.y*1.28,0)
+            azimuth = Float.pi/2; elevation = 0.08; distance = r*0.38
             return
         case .hero:
             azimuth = 0.65

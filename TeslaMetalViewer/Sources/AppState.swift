@@ -146,14 +146,6 @@ public class AppState: ObservableObject {
     @Published public var supportsClimate = false
     @Published public var supportsCharging = false
 
-    @Published public var cabinColor: Color = .cyan { didSet { onMaterialChanged?() } }
-    @Published public var cabinBrightness: Float = 0.7 { didSet { onMaterialChanged?() } }
-    @Published public var cabinLightsOn = true { didSet { onMaterialChanged?() } }
-    public var cabinRGB: SIMD3<Float> {
-        let c = NSColor(cabinColor).usingColorSpace(.deviceRGB) ?? .cyan
-        return SIMD3(Float(pow(c.redComponent,2.2)),Float(pow(c.greenComponent,2.2)),Float(pow(c.blueComponent,2.2)))
-    }
-
     // Exterior Lighting & Accessory Controls
     @Published public var areHeadlightsOn: Bool = true { didSet { onLightingChanged?() } }
     @Published public var areDRLOn: Bool = true { didSet { onLightingChanged?() } }

@@ -157,8 +157,6 @@ public struct MetalViewport: NSViewRepresentable {
             let blinkOn = VehicleLighting.blinkOn(time: parent.rayTracer.effectTime-parent.rayTracer.signalStartTime)
             if (state.areLeftTurnSignalOn || state.areRightTurnSignalOn) && blinkOn != lastBlinkOn { parent.rayTracer.resetAccumulation() }
             lastBlinkOn = blinkOn
-            parent.rayTracer.cabinColor = state.cabinRGB
-            parent.rayTracer.cabinBrightness = state.cabinLightsOn ? state.cabinBrightness : 0
             parent.rayTracer.lighting = state.lighting
             parent.rayTracer.rainIntensity = state.rainIntensity
             parent.rayTracer.wetness = state.wetness
