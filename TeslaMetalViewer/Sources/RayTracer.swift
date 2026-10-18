@@ -43,6 +43,39 @@ public class RayTracer {
     // Scene geometry & hardware acceleration structure
     public private(set) var currentScene: ModelSceneData?
     public private(set) var accelerationStructure: MTLAccelerationStructure?
+    // Bound latency: a busy GPU must not accumulate stale animation frames.
+    private let framesInFlight = DispatchSemaphore(value: 2)
+    private var interactiveFrameAcquired = false
+    private var motionScale: Double = 0.65
+    private var lastScaleUpdate: Double = 0
+    private var gpuFrameSeconds: Double = 1.0 / 60.0
+
+    public func beginInteractiveFrame() -> Bool {
+        guard framesInFlight.wait(timeout: .now()) == .success else { return false }
+        interactiveFrameAcquired = true
+        return true
+    }
+
+    private func sizeDrawable(_ view: MTKView, moving: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if moving && now - lastScaleUpdate > 0.5 {
+            let budget = 0.85 / Double(max(60, view.preferredFramesPerSecond))
+            if gpuFrameSeconds > budget * 1.1 {
+                motionScale = max(0.35, motionScale * max(0.8, sqrt(budget / gpuFrameSeconds)))
+            } else if gpuFrameSeconds < budget * 0.7 {
+                motionScale = min(1, motionScale + 0.05)
+            }
+            lastScaleUpdate = now
+        }
+        let full = view.convertToBacking(view.bounds).size
+        let scale = moving ? motionScale : 1
+        let size = CGSize(width: max(1, (full.width * scale).rounded()),
+                          height: max(1, (full.height * scale).rounded()))
+        if view.drawableSize != size { view.drawableSize = size }
+    }
+
+    private var builtTopology: UUID?
+    private var builtLighting: LightingPreset?
     private var vertexBuffer: MTLBuffer?
     private var indexBuffer: MTLBuffer?
     private var geometryBuffer: MTLBuffer?
@@ -225,7 +258,10 @@ public class RayTracer {
             rearStrip = SIMD4(min(lo.x,lip)-0.003,lo.y,(lo.z+hi.z)/2,lamp.emissive)
             rearStripSize = SIMD4((hi.z-lo.z)/2,0,0,0)
         }
+        let canRefit = builtTopology == scene.topologyID && builtLighting == lighting
         var allVertices: [RaytraceVertex] = []
+        allVertices.reserveCapacity(scene.totalVertices)
+        var indexCount = 0
         var allIndices: [UInt32] = []
         var geomInfos: [GeometryInfoGPU] = []
         var geomDescriptors: [MTLAccelerationStructureTriangleGeometryDescriptor] = []
@@ -237,12 +273,13 @@ public class RayTracer {
             guard geom.vertices.count > 0, geom.indices.count > 0 else { continue }
 
             let vOffset = UInt32(allVertices.count)
-            let iOffset = UInt32(allIndices.count)
+            let iOffset = UInt32(indexCount)
+            indexCount += geom.indices.count
 
             allVertices.append(contentsOf: geom.vertices)
 
             // Shift each index so allIndices contains global indices into allVertices
-            allIndices.append(contentsOf: geom.indices.map { $0 + vOffset })
+            if !canRefit { allIndices.append(contentsOf: geom.indices.map { $0 + vOffset }) }
 
             var info = GeometryInfoGPU()
             info.emission = SIMD4(geom.emissionColor,Float(geom.emissionTexture))
@@ -272,12 +309,12 @@ public class RayTracer {
             length: allVertices.count * MemoryLayout<RaytraceVertex>.stride,
             options: .storageModeShared
         )!
-        let ib = device.makeBuffer(
+        let ib = canRefit ? indexBuffer! : device.makeBuffer(
             bytes: allIndices,
             length: allIndices.count * MemoryLayout<UInt32>.stride,
             options: .storageModeShared
         )!
-        let gb = device.makeBuffer(
+        let gb = canRefit ? geometryBuffer! : device.makeBuffer(
             bytes: geomInfos,
             length: geomInfos.count * MemoryLayout<GeometryInfoGPU>.stride,
             options: .storageModeShared
@@ -297,18 +334,26 @@ public class RayTracer {
         // Build Hardware Acceleration Structure
         let asDesc = MTLPrimitiveAccelerationStructureDescriptor()
         asDesc.geometryDescriptors = geomDescriptors
+        asDesc.usage = [.refit]
 
         let sizes = device.accelerationStructureSizes(descriptor: asDesc)
         let accel = device.makeAccelerationStructure(size: sizes.accelerationStructureSize)!
-        let scratch = device.makeBuffer(length: sizes.buildScratchBufferSize, options: .storageModePrivate)!
+        let scratch = device.makeBuffer(length: max(sizes.buildScratchBufferSize, sizes.refitScratchBufferSize), options: .storageModePrivate)!
 
         let cmd = commandQueue.makeCommandBuffer()!
         let enc = cmd.makeAccelerationStructureCommandEncoder()!
-        enc.build(accelerationStructure: accel, descriptor: asDesc, scratchBuffer: scratch, scratchBufferOffset: 0)
+        if canRefit, let previous = accelerationStructure {
+            enc.refit(sourceAccelerationStructure: previous, descriptor: asDesc, destinationAccelerationStructure: accel,
+                      scratchBuffer: scratch, scratchBufferOffset: 0)
+        } else {
+            enc.build(accelerationStructure: accel, descriptor: asDesc, scratchBuffer: scratch, scratchBufferOffset: 0)
+        }
         enc.endEncoding()
         cmd.commit()
-        cmd.waitUntilCompleted()
-
+        // The render command follows on the same queue; GPU ordering supplies
+        // the dependency without stalling the UI thread for every pose.
+        builtTopology = scene.topologyID
+        builtLighting = lighting
         self.accelerationStructure = accel
 
     }
@@ -396,6 +441,11 @@ public class RayTracer {
         privacyTintDarkness: Float,
         isInteracting: Bool
     ) {
+        var submitted = false
+        let acquired = interactiveFrameAcquired
+        interactiveFrameAcquired = false
+        defer { if acquired && !submitted { framesInFlight.signal() } }
+        sizeDrawable(view, moving: isInteracting)
         guard let drawable = view.currentDrawable,
               let accel = accelerationStructure,
               let vb = vertexBuffer,
@@ -491,7 +541,18 @@ public class RayTracer {
             blitEnc.endEncoding()
         }
 
+        cmd.addCompletedHandler { [weak self] command in
+            if acquired { self?.framesInFlight.signal() }
+            let duration = command.gpuEndTime - command.gpuStartTime
+            if duration > 0 {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.gpuFrameSeconds = self.gpuFrameSeconds * 0.8 + duration * 0.2
+                }
+            }
+        }
         cmd.present(drawable)
+        submitted = true
         cmd.commit()
 
         if !isInteracting && sampleIndex < maxSamples {

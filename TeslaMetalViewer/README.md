@@ -37,6 +37,14 @@ Scene & atmosphere contains **Studio / Overcast / Golden hour / Blue hour / Neon
 
 These are original procedural viewer scenes inspired by cinematic automotive photography, not APK backgrounds or a full path tracer. They move the viewer toward a racing-game presentation; they do not supply a full AAA game world, licensed game assets, volumetric clouds, or a multi-bounce light transport engine.
 
+## Smooth playback and leather upholstery
+
+Vehicle poses and wheel rotation now update on every displayed frame, with the display's refresh rate as the target. Decoded surfaces, static scenery, indices and material buffers are reused; the GPU refits compatible ray-tracing structures without a CPU wait. At most two interactive frames are queued. Motion resolution adapts to measured GPU time, then returns to full Retina resolution for stationary progressive rendering. Actual frame rate depends on the scene, window size and hardware.
+
+Seat upholstery uses a nonmetallic, high-roughness leather finish with subtle grain and subdued reflections. Packed material maps cannot turn the upholstery glossy; exposed metal, painted seat hardware and plastic retain their separate materials.
+
+`--validate-animation-performance` compares optimized poses with fresh source evaluation across every vehicle, checks refit/build image agreement on Metal, and reports CPU pose timing separately from rendering FPS. `--validate-features` also checks leather material settings.
+
 ## Rebuild and verify
 
 Requires macOS 14+, an Apple Silicon Metal ray-tracing device, Xcode's Swift toolchain, REA, and Python with NumPy/Pillow. Nothing is installed automatically.

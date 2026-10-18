@@ -243,6 +243,7 @@ public struct ShaderSource {
         Lighting l=lightingForPreset(u.renderOptions.x);
         float3 env=sampleEnvironment(reflect(-v,n),u.renderOptions.x);
         float3 F=fresnelSchlick(dot(n,v),mix(float3(0.04),base,metal));
+        if ((mat.textures.w & 1048576)!=0) F *= 0.18;
         return directBRDF(n,v,normalize(l.keyPosition-p),base,metal,max(rough,sqrt(l.softSize/max(length(l.keyPosition-p),1.0))*0.36))*l.keyColor
              +rearPanelLight(p,n,v,base,metal,rough,u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
     }
@@ -744,6 +745,7 @@ public struct ShaderSource {
                 bool isPaint = mat.isPaint == 1;
                 bool isStainlessSteel = ((mat.textures.w & 2048) != 0);
                 bool isRubber = (mat.textures.w & 128) != 0;
+                bool isLeather = (mat.textures.w & 1048576) != 0;
                 float3 tangent = normalize(cross(abs(normal.y) < 0.95 ? float3(0,1,0) : float3(1,0,0), normal));
                 float3 bitangent = cross(normal, tangent);
 
@@ -761,6 +763,12 @@ public struct ShaderSource {
                     flakeSparkle = step(0.93, hash31(cell+7.7))*metallic;
                     baseRough = mix(roughness, clamp(roughness*2.2+0.14, 0.2, 0.62), clearcoat);
                     coatRough = clamp(roughness*0.22, 0.012, 0.06);
+                } else if (isLeather) {
+                    // Fine, restrained grain keeps broad leather highlights soft.
+                    float2 grain = float2(noise2(hitPos.xy*950.0+hitPos.z*51.0),
+                                          noise2(hitPos.zy*950.0+hitPos.x*47.0))-0.5;
+                    flakeN = normalize(normal+(tangent*grain.x+bitangent*grain.y)*0.045);
+                    baseRough = max(0.82,roughness);
                 } else if (isStainlessSteel) {
                     float grain = (noise2(hitPos.xz*450.0 + hitPos.y*120.0) - 0.5)*0.045;
                     baseRough = clamp(roughness + grain, 0.05, 1.0);
@@ -791,6 +799,7 @@ public struct ShaderSource {
                     direct += baseCol*lighting.keyColor*shadow*flakeSparkle*pow(max(dot(flakeN,h),0.0),220.0)*0.8*max(dot(normal,lightDir),0.0);
                 }
                 if (isRubber) { direct *= 0.8; specBase *= 0.05; }
+                if (isLeather) { specBase *= 0.18; }
                 direct += rearPanelLight(hitPos, normal, viewDir, baseCol, metallic, roughness, uniforms);
 
                 float3 layered = direct + diffuseGI + specBase;

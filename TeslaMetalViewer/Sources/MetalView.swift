@@ -124,7 +124,6 @@ public struct MetalViewport: NSViewRepresentable {
         var lastTurnSignalRight = false
         var lastRoofLightbar = false
         var lastLightBeams = true
-        var poseAccumulator: Double = 0
         
         init(_ parent: MetalViewport) {
             self.parent = parent
@@ -138,6 +137,7 @@ public struct MetalViewport: NSViewRepresentable {
         }
         
         public func draw(in view: MTKView) {
+            guard parent.rayTracer.beginInteractiveFrame() else { return }
             let now = ProcessInfo.processInfo.systemUptime
             let dt = min(0.1, now - lastFrame); lastFrame = now
             let state = parent.state
@@ -149,7 +149,7 @@ public struct MetalViewport: NSViewRepresentable {
             if state.animateWeather { parent.rayTracer.weatherTime += Float(dt) }
             parent.rayTracer.drivingSpeed = state.isDriving ? state.drivingSpeed : 0
             if state.isDriving {
-                parent.rayTracer.wheelDegrees += min(state.drivingSpeed / 60,1) * 1000 * Float(dt)
+                parent.rayTracer.wheelDegrees = (parent.rayTracer.wheelDegrees + min(state.drivingSpeed / 60,1) * 1000 * Float(dt)).truncatingRemainder(dividingBy: 360)
             }
             if (state.areLeftTurnSignalOn && !lastTurnSignalLeft) || (state.areRightTurnSignalOn && !lastTurnSignalRight) {
                 parent.rayTracer.signalStartTime = parent.rayTracer.effectTime
@@ -174,17 +174,15 @@ public struct MetalViewport: NSViewRepresentable {
             parent.rayTracer.showLightBeams = state.showLightBeams
             let effectsActive = state.isDriving || state.climateMode > 0 || state.isCharging || (state.lighting.isWeatherScene && state.animateWeather && state.rainIntensity > 0)
             if effectsActive { parent.rayTracer.resetAccumulation() }
-            poseAccumulator += dt
             let beamsChanged = lastLightBeams != state.showLightBeams
             if beamsChanged { parent.rayTracer.resetAccumulation(); lastLightBeams = state.showLightBeams }
             let lightingChanged = lastHeadlights != state.areHeadlightsOn || lastDRL != state.areDRLOn || lastBrakeLights != state.areBrakeLightsOn || lastTurnSignalLeft != state.areLeftTurnSignalOn || lastTurnSignalRight != state.areRightTurnSignalOn || lastRoofLightbar != state.showRoofLightbar
-            if (state.isDriving && poseAccumulator >= 1.0/24.0) || lastCharging != state.isCharging || lastClips != state.selectedAnimations || lightingChanged || (lastPoseTime != state.animationTime && (poseAccumulator >= 1.0 / 24.0 || !state.isPlayingAnimation)) {
+            if state.isDriving || lastCharging != state.isCharging || lastClips != state.selectedAnimations || lightingChanged || lastPoseTime != state.animationTime {
                 parent.rayTracer.applyAnimations(names: state.selectedAnimations, time: state.animationTime)
                 lastCharging = state.isCharging; lastClips = state.selectedAnimations; lastPoseTime = state.animationTime
                 lastHeadlights = state.areHeadlightsOn; lastDRL = state.areDRLOn; lastBrakeLights = state.areBrakeLightsOn
                 lastTurnSignalLeft = state.areLeftTurnSignalOn; lastTurnSignalRight = state.areRightTurnSignalOn
                 lastRoofLightbar = state.showRoofLightbar
-                poseAccumulator = 0
             }
             let camera = parent.state.camera
             let radius = parent.rayTracer.currentScene?.radius ?? 3.0
@@ -249,7 +247,8 @@ public struct MetalViewport: NSViewRepresentable {
         mtkView.delegate = context.coordinator
         mtkView.enableSetNeedsDisplay = false
         mtkView.isPaused = false
-        mtkView.preferredFramesPerSecond = 60
+        mtkView.autoResizeDrawable = false
+        mtkView.preferredFramesPerSecond = NSScreen.main?.maximumFramesPerSecond ?? 60
         
         mtkView.navMode = { [weak state] in state?.navMode ?? .orbit }
         
@@ -287,6 +286,7 @@ public struct MetalViewport: NSViewRepresentable {
     }
     
     public func updateNSView(_ nsView: InteractiveMTKView, context: Context) {
+        context.coordinator.parent = self
         // Redraw triggered automatically via MTKView display timer
     }
 }

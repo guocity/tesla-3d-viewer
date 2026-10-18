@@ -57,6 +57,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             exit(failures.isEmpty ? 0 : 1)
         }
 
+        if CommandLine.arguments.contains("--validate-animation-performance") {
+            let failures = AnimationValidation.run(device: device)
+            print("Animation validation failures: \(failures)")
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if CommandLine.arguments.contains("--validate-models") {
             var failures: [String] = []
             for model in TeslaCatalog.models {
@@ -92,6 +98,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 tourState.selectModel(model); tourState.frameLoadedModel(radius: rest.radius,center: rest.center)
                 if !tourState.isTouring || abs(tourState.camera.tourTime-11.5) > 0.0001 {
                     failures.append(model.id + ": model change interrupted tour")
+                }
+                let upholstery = rest.geometries.filter { ($0.textures.w & 1048576) != 0 }
+                if upholstery.isEmpty { failures.append(model.id + ": missing leather upholstery") }
+                for g in upholstery {
+                    if g.metallic != 0 || g.roughness < 0.82 || g.clearcoat != 0 || g.textures.y != -1 || g.isPaint != 0 {
+                        failures.append(model.id + ": glossy seat upholstery " + g.sourceMaterial)
+                    }
                 }
                 let lenses = rest.geometries.filter { ($0.textures.w & 64) != 0 }
                 if lenses.isEmpty { failures.append(model.id + ": no optical lenses") }

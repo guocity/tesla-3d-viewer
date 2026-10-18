@@ -4,7 +4,9 @@ import simd
 /// These meshes join the acceleration structure, so they cast shadows and appear
 /// in the car, windows and wet road from the same world-space positions.
 enum SceneGeometry {
+    private static var cached: [LightingPreset: [GeometryData]] = [:]
     static func make(for preset: LightingPreset) -> [GeometryData] {
+        if let surfaces = cached[preset] { return surfaces }
         guard preset.isWeatherScene else { return [] }
         var surfaces: [GeometryData] = []
         func box(_ center: SIMD3<Float>, _ size: SIMD3<Float>, _ color: SIMD3<Float>, emission: Float = 0, metal: Float = 0) {
@@ -58,6 +60,7 @@ enum SceneGeometry {
                 }
             }
         }
+        cached[preset] = surfaces
         return surfaces
     }
 }

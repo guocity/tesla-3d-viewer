@@ -27,6 +27,7 @@ public struct GeometryData {
     public var isGround: UInt32 = 0
     public var isPaint: UInt32 = 0
     public var textures = SIMD4<Int32>(-1,-1,-1,0)
+    public var sourceNode: Int = -1
     public var componentName = ""
     public var sourceMaterial = ""
 }
@@ -38,6 +39,7 @@ public struct SourceAnimation: Identifiable {
     public let root: String
 }
 public struct ModelSceneData {
+    public var topologyID = UUID()
     public var geometries: [GeometryData] = []
     public var boundsMin: SIMD3<Float> = .zero
     public var boundsMax: SIMD3<Float> = .zero
@@ -59,13 +61,14 @@ public class GLBLoader {
     private static var cachedDocument: ([String: Any], Data)?
     private static var cachedAccessors: [String: [[Float]]] = [:]
     private static var cachedTextures: [MTLTexture] = []
+    private static var poseCache: (flags: [Bool], scene: ModelSceneData, rawScene: ModelSceneData, world: [simd_float4x4], offset: SIMD3<Float>)?
     private static var restBounds: (SIMD3<Float>, SIMD3<Float>)?
 
     public static func loadModel(from url: URL, device: MTLDevice,
                                  animation: String? = nil, selectedAnimations: Set<String> = [], time: Float = 0, charging: Bool = false, wheelDegrees: Float = 0,
                                  headlightsOn: Bool = true, drlOn: Bool = true, brakeLightsOn: Bool = false,
                                  turnSignalLeftOn: Bool = false, turnSignalRightOn: Bool = false,
-                                 showRoofLightbar: Bool = false) -> ModelSceneData? {
+                                 showRoofLightbar: Bool = false, usePoseCache: Bool = true) -> ModelSceneData? {
         do {
             if cachedURL != url {
                 let data = try Data(contentsOf: url)
@@ -75,7 +78,7 @@ public class GLBLoader {
                 let document = try JSONSerialization.jsonObject(with: data.subdata(in: 20..<20+jsonLength))
                 guard let json = document as? [String: Any] else { return nil }
                 cachedDocument = (json, data.subdata(in: 28+jsonLength..<data.count))
-                cachedURL = url; restBounds = nil; cachedTextures = []; cachedAccessors = [:]
+                cachedURL = url; poseCache = nil; restBounds = nil; cachedTextures = []; cachedAccessors = [:]
             }
             guard let (json, bin) = cachedDocument else { return nil }
             let nodes = json["nodes"] as? [[String: Any]] ?? []
@@ -256,6 +259,54 @@ public class GLBLoader {
                 for c in nodes[i]["children"] as? [Int] ?? [] { visit(c, world[i]) }
             }
             for i in nodes.indices where parents[i] == -1 { visit(i, matrix_identity_float4x4) }
+            let flags = [charging, headlightsOn, drlOn, brakeLightsOn, turnSignalLeftOn, turnSignalRightOn, showRoofLightbar]
+            // Keep decoded surfaces, indices, UVs and materials. Only descendants
+            // of a moving joint need new world-space positions and normals.
+            if usePoseCache, let cache = poseCache, cache.flags == flags {
+                var scene = cache.scene
+                var centering = matrix_identity_float4x4
+                centering.columns.3 = SIMD4(-cache.offset, 1)
+                let uncentering = centering.inverse
+                var transforms: [Int: simd_float4x4] = [:]
+                for i in world.indices where world[i] != cache.world[i] {
+                    transforms[i] = centering * world[i] * cache.world[i].inverse * uncentering
+                }
+                // Procedural lamp fits depend on nearby posed panels. Refit
+                // those from the uncalibrated surfaces when their inputs move.
+                let recalibrate = cache.rawScene.geometries.contains { g in
+                    guard transforms[g.sourceNode] != nil else { return false }
+                    return g.lightRole != nil || g.componentName.contains("Trunk_Cover")
+                        || g.sourceMaterial.lowercased().contains("glass_lights")
+                        || (url.lastPathComponent == "bayberry_e41.glb" && g.transmission < 0.1)
+                }
+                if recalibrate { scene = cache.rawScene }
+                for g in scene.geometries.indices {
+                    guard var transform = transforms[scene.geometries[g].sourceNode] else { continue }
+                    if recalibrate { transform = uncentering * transform * centering }
+                    let basis = simd_float3x3(SIMD3(transform[0].x,transform[0].y,transform[0].z),
+                                              SIMD3(transform[1].x,transform[1].y,transform[1].z),
+                                              SIMD3(transform[2].x,transform[2].y,transform[2].z))
+                    let normalMatrix = basis.inverse.transpose
+                    scene.geometries[g].vertices = scene.geometries[g].vertices.map { vertex in
+                        var v = vertex
+                        v.position = transform * vertex.position
+                        v.normal = SIMD4(simd_normalize(normalMatrix * SIMD3(vertex.normal.x,vertex.normal.y,vertex.normal.z)), 0)
+                        return v
+                    }
+                }
+                if recalibrate {
+                    VehicleLighting.calibrateRear(&scene,model: url.lastPathComponent,running: headlightsOn || drlOn,braking: brakeLightsOn)
+                    for g in scene.geometries.indices where scene.geometries[g].isGround != 1 {
+                        for v in scene.geometries[g].vertices.indices { scene.geometries[g].vertices[v].position -= SIMD4(cache.offset,0) }
+                    }
+                    if let ground = cache.scene.geometries.last { scene.geometries.append(ground) }
+                    // Reuse GPU topology when the fitted triangle partitions agree.
+                    let sameTopology = scene.geometries.count == cache.scene.geometries.count &&
+                        zip(scene.geometries,cache.scene.geometries).allSatisfy { $0.indices == $1.indices && $0.vertices.count == $1.vertices.count }
+                    scene.topologyID = sameTopology ? cache.scene.topologyID : UUID()
+                }
+                return scene
+            }
             var scene = ModelSceneData(); scene.animations = animations; scene.textures = cachedTextures
             var minimum = SIMD3<Float>(repeating: .infinity), maximum = -minimum
             let isCybertruck = url.lastPathComponent.contains("cybertruck")
@@ -277,7 +328,7 @@ public class GLBLoader {
                     let uv2s = attributes["TEXCOORD_1"].map { values($0, components:2) } ?? []
                     let normals = attributes["NORMAL"].map { values($0, components:3) } ?? []
                     guard !positions.isEmpty else { continue }
-                    var geom = GeometryData(); geom.componentName = paths[i]
+                    var geom = GeometryData(); geom.sourceNode = i; geom.componentName = paths[i]
                     if paths[i].contains("BackfaceCull") { geom.textures.w |= 8192 }
                     var isEmitterSurface = false
                     if let m = prim["material"] as? Int, materials.indices.contains(m) {
@@ -328,6 +379,16 @@ public class GLBLoader {
                             geom.emissionTexture = geom.textures.x
                         }
                         let original = (ex["originalName"] as? String ?? "").lowercased()
+                        let upholsteryName = original.isEmpty ? geom.sourceMaterial.lowercased() : original
+                        let upholstery = category.hasPrefix("interior") &&
+                            (upholsteryName.contains("leather") || upholsteryName.contains("seat") || upholsteryName.hasPrefix("interior_")) &&
+                            !["plastic", "paint", "anodized", "seatbelt", "carpet", "textile", "cupholder"].contains(where: { upholsteryName.contains($0) })
+                        if upholstery {
+                            geom.metallic = 0; geom.roughness = max(0.82, geom.roughness)
+                            geom.clearcoat = 0
+                            geom.textures.y = -1 // Packed roughness must not polish upholstery.
+                            geom.textures.w |= 1048576 // Subdued leather sheen, separate from paint/rubber.
+                        }
                         if (category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light")) && !original.contains("lightbar") {
                             // Godot's dark blend color is not absorption in a clear optical lens.
                             geom.baseColor = SIMD3(repeating: 1)
@@ -436,6 +497,7 @@ public class GLBLoader {
                     if !geom.indices.isEmpty { scene.geometries.append(geom) }
                 }
             }
+            let rawGeometries = scene.geometries
             VehicleLighting.calibrateRear(&scene,model: url.lastPathComponent,running: headlightsOn || drlOn,braking: brakeLightsOn)
             guard !scene.geometries.isEmpty else { return nil }
             if restBounds == nil { restBounds = (minimum,maximum) }
@@ -461,6 +523,9 @@ public class GLBLoader {
             scene.center = (restMin+restMax)/2-offset; scene.radius = simd_length(size)/2
             scene.totalTriangles = scene.geometries.reduce(0) { $0+$1.indices.count/3 }
             scene.totalVertices = scene.geometries.reduce(0) { $0+$1.vertices.count }
+            var rawScene = scene
+            rawScene.geometries = rawGeometries
+            poseCache = (flags, scene, rawScene, world, offset)
             return scene
         } catch { print("GLB load failed: \(error)"); return nil }
     }
