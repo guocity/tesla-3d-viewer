@@ -115,7 +115,15 @@ public struct MetalViewport: NSViewRepresentable {
         var lastPoseTime: Float = -1
         var lastClips: Set<String> = []
         var lastTourUpdate: Double = 0
+        var lastBlinkOn = true
         var lastCharging = false
+        var lastHeadlights = true
+        var lastDRL = true
+        var lastBrakeLights = false
+        var lastTurnSignalLeft = false
+        var lastTurnSignalRight = false
+        var lastRoofLightbar = false
+        var lastLightBeams = true
         var poseAccumulator: Double = 0
         
         init(_ parent: MetalViewport) {
@@ -143,6 +151,14 @@ public struct MetalViewport: NSViewRepresentable {
             if state.isDriving {
                 parent.rayTracer.wheelDegrees += min(state.drivingSpeed / 60,1) * 1000 * Float(dt)
             }
+            if (state.areLeftTurnSignalOn && !lastTurnSignalLeft) || (state.areRightTurnSignalOn && !lastTurnSignalRight) {
+                parent.rayTracer.signalStartTime = parent.rayTracer.effectTime
+            }
+            let blinkOn = VehicleLighting.blinkOn(time: parent.rayTracer.effectTime-parent.rayTracer.signalStartTime)
+            if (state.areLeftTurnSignalOn || state.areRightTurnSignalOn) && blinkOn != lastBlinkOn { parent.rayTracer.resetAccumulation() }
+            lastBlinkOn = blinkOn
+            parent.rayTracer.cabinColor = state.cabinRGB
+            parent.rayTracer.cabinBrightness = state.cabinLightsOn ? state.cabinBrightness : 0
             parent.rayTracer.lighting = state.lighting
             parent.rayTracer.rainIntensity = state.rainIntensity
             parent.rayTracer.wetness = state.wetness
@@ -151,12 +167,26 @@ public struct MetalViewport: NSViewRepresentable {
             parent.rayTracer.headlightReflection = state.headlightReflection
             parent.rayTracer.climateMode = state.climateMode
             parent.rayTracer.charging = state.isCharging
+            parent.rayTracer.headlightsOn = state.areHeadlightsOn
+            parent.rayTracer.drlOn = state.areDRLOn
+            parent.rayTracer.brakeLightsOn = state.areBrakeLightsOn
+            parent.rayTracer.turnSignalLeftOn = state.areLeftTurnSignalOn
+            parent.rayTracer.turnSignalRightOn = state.areRightTurnSignalOn
+            parent.rayTracer.showRoofLightbar = state.showRoofLightbar
+            parent.rayTracer.showLightBeams = state.showLightBeams
             let effectsActive = state.isDriving || state.climateMode > 0 || state.isCharging || (state.lighting.isWeatherScene && state.animateWeather && state.rainIntensity > 0)
             if effectsActive { parent.rayTracer.resetAccumulation() }
             poseAccumulator += dt
-            if (state.isDriving && poseAccumulator >= 1.0/24.0) || lastCharging != state.isCharging || lastClips != state.selectedAnimations || (lastPoseTime != state.animationTime && (poseAccumulator >= 1.0 / 24.0 || !state.isPlayingAnimation)) {
+            let beamsChanged = lastLightBeams != state.showLightBeams
+            if beamsChanged { parent.rayTracer.resetAccumulation(); lastLightBeams = state.showLightBeams }
+            let lightingChanged = lastHeadlights != state.areHeadlightsOn || lastDRL != state.areDRLOn || lastBrakeLights != state.areBrakeLightsOn || lastTurnSignalLeft != state.areLeftTurnSignalOn || lastTurnSignalRight != state.areRightTurnSignalOn || lastRoofLightbar != state.showRoofLightbar
+            if (state.isDriving && poseAccumulator >= 1.0/24.0) || lastCharging != state.isCharging || lastClips != state.selectedAnimations || lightingChanged || (lastPoseTime != state.animationTime && (poseAccumulator >= 1.0 / 24.0 || !state.isPlayingAnimation)) {
                 parent.rayTracer.applyAnimations(names: state.selectedAnimations, time: state.animationTime)
-                lastCharging = state.isCharging; lastClips = state.selectedAnimations; lastPoseTime = state.animationTime; poseAccumulator = 0
+                lastCharging = state.isCharging; lastClips = state.selectedAnimations; lastPoseTime = state.animationTime
+                lastHeadlights = state.areHeadlightsOn; lastDRL = state.areDRLOn; lastBrakeLights = state.areBrakeLightsOn
+                lastTurnSignalLeft = state.areLeftTurnSignalOn; lastTurnSignalRight = state.areRightTurnSignalOn
+                lastRoofLightbar = state.showRoofLightbar
+                poseAccumulator = 0
             }
             let camera = parent.state.camera
             let radius = parent.rayTracer.currentScene?.radius ?? 3.0

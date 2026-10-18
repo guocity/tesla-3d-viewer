@@ -5,7 +5,7 @@ import simd
 public enum NavigationMode: String, CaseIterable, Identifiable {
     case orbit = "Orbit"
     case pan = "Pan"
-    
+
     public var id: String { rawValue }
 }
 
@@ -27,7 +27,7 @@ public class AppState: ObservableObject {
             onModelChanged?()
         }
     }
-    
+
     @Published public var selectedPaint: PaintColorPreset = TeslaCatalog.paints[0] {
         didSet {
             metallic = selectedPaint.metallic
@@ -36,7 +36,7 @@ public class AppState: ObservableObject {
             onMaterialChanged?()
         }
     }
-    
+
     @Published public var metallic: Float = 0.96 {
         didSet { onMaterialChanged?() }
     }
@@ -46,14 +46,14 @@ public class AppState: ObservableObject {
     @Published public var clearcoat: Float = 0.20 {
         didSet { onMaterialChanged?() }
     }
-    
+
     @Published public var groundReflectivity: Float = 0.25 {
         didSet { onMaterialChanged?() }
     }
     @Published public var groundRoughness: Float = 0.18 {
         didSet { onMaterialChanged?() }
     }
-    
+
     @Published public var lighting: LightingPreset = .studio { didSet { onMaterialChanged?() } }
     @Published public var rainIntensity: Float = 0.65 { didSet { onMaterialChanged?() } }
     @Published public var wetness: Float = 0.85 { didSet { onMaterialChanged?() } }
@@ -69,11 +69,11 @@ public class AppState: ObservableObject {
     @Published public var privacyTintDarkness: Float = 0.4 {
         didSet { onMaterialChanged?() }
     }
-    
+
     // Viewport Navigation Mode (Orbit / Rotate vs Pan / Move)
     @Published public var navMode: NavigationMode = .orbit
     public var initialPreset: CameraPreset? = nil
-    
+
     // Cinematic Showcase Car Tour
     @Published public var isTouring: Bool = false {
         didSet {
@@ -89,7 +89,7 @@ public class AppState: ObservableObject {
     @Published public var tourProgress: Float = 0.0
     @Published public var tourStageName: String = "Hero 3/4 Overview"
     @Published public var tourSpeed: Float = 1.0
-    
+
     @Published public var isTurntable: Bool = false {
         didSet {
             if isTurntable { isTouring = false }
@@ -97,12 +97,12 @@ public class AppState: ObservableObject {
             onMaterialChanged?()
         }
     }
-    
+
     @Published public var sampleCount: Int = 0
     @Published public var totalTriangles: Int = 0
     @Published public var totalVertices: Int = 0
     @Published public var isInteracting: Bool = false
-    
+
     @Published public var animations: [SourceAnimation] = []
     @Published public var selectedAnimations: Set<String> = [] {
         didSet {
@@ -145,13 +145,32 @@ public class AppState: ObservableObject {
     @Published public var isCharging = false { didSet { if isCharging { isDriving = false } } }
     @Published public var supportsClimate = false
     @Published public var supportsCharging = false
+
+    @Published public var cabinColor: Color = .cyan { didSet { onMaterialChanged?() } }
+    @Published public var cabinBrightness: Float = 0.7 { didSet { onMaterialChanged?() } }
+    @Published public var cabinLightsOn = true { didSet { onMaterialChanged?() } }
+    public var cabinRGB: SIMD3<Float> {
+        let c = NSColor(cabinColor).usingColorSpace(.deviceRGB) ?? .cyan
+        return SIMD3(Float(pow(c.redComponent,2.2)),Float(pow(c.greenComponent,2.2)),Float(pow(c.blueComponent,2.2)))
+    }
+
+    // Exterior Lighting & Accessory Controls
+    @Published public var areHeadlightsOn: Bool = true { didSet { onLightingChanged?() } }
+    @Published public var areDRLOn: Bool = true { didSet { onLightingChanged?() } }
+    @Published public var areLeftTurnSignalOn: Bool = false { didSet { onLightingChanged?() } }
+    @Published public var areRightTurnSignalOn: Bool = false { didSet { onLightingChanged?() } }
+    @Published public var areBrakeLightsOn: Bool = false { didSet { onLightingChanged?() } }
+    @Published public var showRoofLightbar: Bool = false { didSet { onLightingChanged?() } }
+    @Published public var showLightBeams: Bool = true { didSet { onLightingChanged?() } }
+
     public let camera = Camera()
-    
+
     public var onModelChanged: (() -> Void)?
     public var onMaterialChanged: (() -> Void)?
-    
+    public var onLightingChanged: (() -> Void)?
+
     public init() {}
-    
+
     public func frameLoadedModel(radius: Float, center: SIMD3<Float>, preset: CameraPreset = .hero) {
         if isTouring {
             // Keep the tour clock and stage while adapting framing to the new car.
@@ -176,10 +195,10 @@ public class AppState: ObservableObject {
         metallic = defaultPaint.metallic
         roughness = defaultPaint.roughness
         clearcoat = defaultPaint.clearcoat
-        
+
         // Start with optically clear windows; privacy tint remains an explicit choice.
         isPrivacyTintEnabled = false
-        
+
         onMaterialChanged?()
     }
 }

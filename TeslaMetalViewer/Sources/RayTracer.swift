@@ -4,6 +4,7 @@ import MetalKit
 import simd
 
 public struct GeometryInfoGPU {
+    public var emission = SIMD4<Float>(1,1,1,-1)
     public var textures = SIMD4<Int32>(-1,-1,-1,0)
     public var vertexOffset: UInt32 = 0
     public var indexOffset: UInt32 = 0
@@ -25,6 +26,11 @@ public struct UniformsGPU {
     public var materialParams: SIMD4<Float> = .zero
     public var viewport: SIMD4<UInt32> = .zero
     public var tintParams: SIMD4<Float> = .zero
+    public var cabinLight = SIMD4<Float>(0.03,0.35,1,0.7)
+    public var rearStrip = SIMD4<Float>(repeating: 0)
+    public var rearStripSize = SIMD4<Float>(repeating: 0)
+    public var headlampLeft = SIMD4<Float>(repeating: 0)
+    public var headlampRight = SIMD4<Float>(repeating: 0)
     public var weather = SIMD4<Float>(0.65,0.85,0,0)
     public var renderOptions = SIMD4<Float>(0,1,0,0.15)
 }
@@ -52,6 +58,9 @@ public class RayTracer {
     public let maxSamples: UInt32 = 256
     public var isDirty: Bool = true
     private var geometryCount: Int = 0
+    public private(set) var headlampPositions = [SIMD4<Float>(repeating: 0),SIMD4<Float>(repeating: 0)]
+    private var rearStrip = SIMD4<Float>(repeating: 0)
+    private var rearStripSize = SIMD4<Float>(repeating: 0)
     private var lastTintParams: SIMD4<Float> = .zero
 
     public init(device: MTLDevice) {
@@ -75,6 +84,12 @@ public class RayTracer {
         }
     }
 
+    public var cabinColor = SIMD3<Float>(0.03,0.35,1) { didSet { if oldValue != cabinColor { resetAccumulation() } } }
+    public var cabinBrightness: Float = 0.7 { didSet { if oldValue != cabinBrightness { resetAccumulation() } } }
+    public var signalState: Float {
+        Float((VehicleLighting.blinkOn(time: effectTime-signalStartTime) ? 1 : 0) | (turnSignalLeftOn ? 2 : 0) | (turnSignalRightOn ? 4 : 0))
+    }
+    public var signalStartTime: Float = 0
     public var weatherTime: Float = 2
     public var effectTime: Float = 0
     public var drivingSpeed: Float = 0
@@ -90,15 +105,34 @@ public class RayTracer {
     public var rainIntensity: Float = 0.65 { didSet { if oldValue != rainIntensity { resetAccumulation() } } }
     public var wetness: Float = 0.85 { didSet { if oldValue != wetness { resetAccumulation() } } }
     public var charging = false
+    public var headlightsOn: Bool = true
+    public var drlOn: Bool = true
+    public var brakeLightsOn: Bool = false
+    public var turnSignalLeftOn: Bool = false
+    public var turnSignalRightOn: Bool = false
+    public var showRoofLightbar: Bool = false
+    public var showLightBeams: Bool = true
     private var modelURL: URL?
 
-    public func loadModel(filename: String) -> Bool {
+    public func loadModel(filename: String, headlightsOn: Bool = true, drlOn: Bool = true, brakeLightsOn: Bool = false,
+                          turnSignalLeftOn: Bool = false, turnSignalRightOn: Bool = false, showRoofLightbar: Bool = false) -> Bool {
         guard let url = TeslaCatalog.resolveModelPath(filename: filename) else {
             print("Could not find model file: \(filename)")
             return false
         }
 
-        guard let scene = GLBLoader.loadModel(from: url, device: device) else {
+        self.signalStartTime = effectTime
+        self.headlightsOn = headlightsOn
+        self.drlOn = drlOn
+        self.brakeLightsOn = brakeLightsOn
+        self.turnSignalLeftOn = turnSignalLeftOn
+        self.turnSignalRightOn = turnSignalRightOn
+        self.showRoofLightbar = showRoofLightbar
+
+        guard let scene = GLBLoader.loadModel(from: url, device: device, charging: charging, wheelDegrees: wheelDegrees,
+                                             headlightsOn: headlightsOn, drlOn: drlOn, brakeLightsOn: brakeLightsOn,
+                                             turnSignalLeftOn: turnSignalLeftOn, turnSignalRightOn: turnSignalRightOn,
+                                             showRoofLightbar: showRoofLightbar) else {
             print("Failed to load and parse GLB: \(filename)")
             return false
         }
@@ -116,19 +150,57 @@ public class RayTracer {
 
     public func applyAnimations(names: Set<String>, time: Float) {
         guard let url = modelURL,
-              let scene = GLBLoader.loadModel(from: url, device: device, selectedAnimations: names, time: time, charging: charging, wheelDegrees: wheelDegrees) else { return }
+              let scene = GLBLoader.loadModel(from: url, device: device, selectedAnimations: names, time: time, charging: charging, wheelDegrees: wheelDegrees,
+                                             headlightsOn: headlightsOn, drlOn: drlOn, brakeLightsOn: brakeLightsOn,
+                                             turnSignalLeftOn: turnSignalLeftOn, turnSignalRightOn: turnSignalRightOn,
+                                             showRoofLightbar: showRoofLightbar) else { return }
         currentScene = scene
         buildAccelerationStructure(from: scene)
         resetAccumulation()
     }
 
     private func buildAccelerationStructure(from scene: ModelSceneData) {
+        // Derive the beam emitters from the actual front lamp triangles, never
+        // from selected paint metallicity or sedan-sized hardcoded coordinates.
+        for side in 0..<2 {
+            var lo = SIMD3<Float>(repeating: .infinity), hi = -lo
+            for g in scene.geometries where g.lightRole == "headlights" {
+                for index in g.indices {
+                    let v = g.vertices[Int(index)].position, p = SIMD3(v.x,v.y,v.z)
+                    if p.x > 0 && (side == 0 ? p.z < -0.02 : p.z > 0.02) { lo = simd_min(lo,p); hi = simd_max(hi,p) }
+                }
+            }
+            headlampPositions[side] = lo.x.isFinite ? SIMD4((lo+hi)/2,1) : .zero
+        }
+        rearStrip = .zero; rearStripSize = .zero
+        // Juniper's authored parking emitter illuminates the recessed TESLA panel
+        // from above. Keep its actual location; do not turn it toward the camera.
+        if let lamp = scene.geometries.first(where: { $0.lightRole == "parking" && $0.emissive > 0 }) {
+            let points = lamp.indices.map { lamp.vertices[Int($0)].position }
+            var lo = SIMD3<Float>(repeating: .infinity), hi = -lo
+            for v in points { let p = SIMD3(v.x,v.y,v.z); lo = simd_min(lo,p); hi = simd_max(hi,p) }
+            // Sample the upper recess lip: the source card extends into the
+            // housing, while its effective aperture must sit above the receiver.
+            var lip = lo.x
+            let span = (hi.z-lo.z)*0.4
+            for g in scene.geometries where g.componentName.contains("Trunk_Cover") {
+                for index in g.indices {
+                    let p = g.vertices[Int(index)].position
+                    if p.y < lo.y && p.y > lo.y-0.06 && abs(p.z) < span { lip = min(lip,p.x) }
+                }
+            }
+            rearStrip = SIMD4(min(lo.x,lip)-0.003,lo.y,(lo.z+hi.z)/2,lamp.emissive)
+            rearStripSize = SIMD4((hi.z-lo.z)/2,0,0,0)
+        }
         var allVertices: [RaytraceVertex] = []
         var allIndices: [UInt32] = []
         var geomInfos: [GeometryInfoGPU] = []
         var geomDescriptors: [MTLAccelerationStructureTriangleGeometryDescriptor] = []
 
         for geom in scene.geometries + SceneGeometry.make(for: lighting) {
+            // Source additive lamp meshes are invisible when off; an opaque
+            // black substitute would hide running lights layered behind them.
+            if geom.isLampOverlay && geom.emissive <= 0 { continue }
             guard geom.vertices.count > 0, geom.indices.count > 0 else { continue }
 
             let vOffset = UInt32(allVertices.count)
@@ -140,6 +212,7 @@ public class RayTracer {
             allIndices.append(contentsOf: geom.indices.map { $0 + vOffset })
 
             var info = GeometryInfoGPU()
+            info.emission = SIMD4(geom.emissionColor,Float(geom.emissionTexture))
             info.textures = geom.textures
             info.vertexOffset = vOffset
             info.indexOffset = iOffset
@@ -311,9 +384,13 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
-        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,0)
+        let beamsActive: Float = (headlightsOn && showLightBeams) ? 1.0 : 0.0
+        uniforms.cabinLight = SIMD4(cabinColor,cabinBrightness)
+        uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
+        uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
+        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,beamsActive)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
-        uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
+        uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4
         uniforms.climateRight = currentScene?.climatePlanes.dropFirst().first ?? matrix_identity_float4x4
@@ -413,9 +490,12 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
-        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,0)
+        uniforms.cabinLight = SIMD4(cabinColor,cabinBrightness)
+        uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
+        uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
+        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,(headlightsOn && showLightBeams) ? 1 : 0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
-        uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
+        uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4
         uniforms.climateRight = currentScene?.climatePlanes.dropFirst().first ?? matrix_identity_float4x4

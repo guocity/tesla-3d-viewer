@@ -90,6 +90,23 @@ public struct ContentView: View {
                                 Text("Road, airflow and cable effects ported from the APK scripts and shaders. Opaque body panels occlude airflow; glass transmits it.").font(.caption).foregroundStyle(.secondary)
                             }.padding(8)
                         }
+                        GroupBox("Lighting & Accessories") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("Headlights", isOn: $state.areHeadlightsOn)
+                                Toggle("Daytime Running Lights (DRL)", isOn: $state.areDRLOn)
+                                HStack(spacing: 12) {
+                                    Toggle("Left Turn", isOn: $state.areLeftTurnSignalOn)
+                                    Toggle("Right Turn", isOn: $state.areRightTurnSignalOn)
+                                }
+                                Toggle("Volumetric Light Beams", isOn: $state.showLightBeams).disabled(!state.areHeadlightsOn)
+                                Toggle("Brake lights", isOn: $state.areBrakeLightsOn)
+                                if state.selectedModel.id == "cybertruck" {
+                                    Toggle("Roof-mounted lightbar", isOn: $state.showRoofLightbar)
+                                    Text("Optional off-road overhead lightbar accessory.").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text("Independent front illumination (Headlights, DRL, turn signals & volumetric projected beams) with vivid red brake lighting across all Tesla models.").font(.caption).foregroundStyle(.secondary)
+                            }.padding(8)
+                        }
                         GroupBox("Finish") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Picker("Paint", selection: Binding(get: { state.selectedPaint.id }, set: { id in
@@ -116,6 +133,17 @@ public struct ContentView: View {
                                     Button("Restart tour") { state.camera.tourTime = 0; state.tourProgress = 0 }
                                 }
                             }.padding(8)
+                        }
+                        if !["semi","models_legacy","modelx_legacy"].contains(state.selectedModel.id) {
+                        GroupBox("Cabin accent lighting") {
+                            VStack(alignment: .leading,spacing: 10) {
+                                Toggle("Interior light strips",isOn: $state.cabinLightsOn)
+                                ColorPicker("Strip color",selection: $state.cabinColor,supportsOpacity: false)
+                                control("Brightness",value: $state.cabinBrightness,range: 0...3)
+                                Button("View cabin") { fit(.cabin) }
+                                Text("Uses source LED surfaces when available; added cabin accents are viewer features.").font(.caption).foregroundStyle(.secondary)
+                            }.padding(8)
+                        }
                         }
                         GroupBox("Scene & atmosphere") {
                             VStack(alignment: .leading, spacing: 12) {
@@ -176,7 +204,13 @@ public struct ContentView: View {
         state.isPlayingAnimation = false; state.selectedAnimations = []
         state.isCharging = false; state.climateMode = 0; state.isDriving = false
         rayTracer.wheelDegrees = 0; rayTracer.effectTime = 0
-        if rayTracer.loadModel(filename: state.selectedModel.filename) {
+        if rayTracer.loadModel(filename: state.selectedModel.filename,
+                               headlightsOn: state.areHeadlightsOn,
+                               drlOn: state.areDRLOn,
+                               brakeLightsOn: state.areBrakeLightsOn,
+                               turnSignalLeftOn: state.areLeftTurnSignalOn,
+                               turnSignalRightOn: state.areRightTurnSignalOn,
+                               showRoofLightbar: state.showRoofLightbar) {
             state.loadError = nil
             state.supportsClimate = !(rayTracer.currentScene?.climatePlanes.isEmpty ?? true)
             state.supportsCharging = rayTracer.currentScene?.hasChargingCable ?? false

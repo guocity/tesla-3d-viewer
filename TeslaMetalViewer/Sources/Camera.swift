@@ -2,6 +2,7 @@ import Foundation
 import simd
 
 public enum CameraPreset {
+    case cabin
     case hero
     case side
     case front
@@ -77,6 +78,10 @@ public class Camera {
         target = SIMD3<Float>(0, center.y * 0.85, 0)
         
         switch preset {
+        case .cabin:
+            target = SIMD3(r*0.30,center.y*1.28,0)
+            azimuth = -Float.pi/2; elevation = 0.04; distance = r*0.5
+            return
         case .hero:
             azimuth = 0.65
             elevation = 0.30

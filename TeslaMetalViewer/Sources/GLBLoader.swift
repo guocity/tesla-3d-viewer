@@ -18,6 +18,10 @@ public struct GeometryData {
     public var metallic: Float = 0
     public var roughness: Float = 0.5
     public var clearcoat: Float = 0
+    public var emissionColor = SIMD3<Float>(repeating: 1)
+    public var emissionTexture: Int32 = -1
+    public var lightRole: String?
+    public var isLampOverlay = false
     public var emissive: Float = 0
     public var transmission: Float = 0
     public var isGround: UInt32 = 0
@@ -58,7 +62,10 @@ public class GLBLoader {
     private static var restBounds: (SIMD3<Float>, SIMD3<Float>)?
 
     public static func loadModel(from url: URL, device: MTLDevice,
-                                 animation: String? = nil, selectedAnimations: Set<String> = [], time: Float = 0, charging: Bool = false, wheelDegrees: Float = 0) -> ModelSceneData? {
+                                 animation: String? = nil, selectedAnimations: Set<String> = [], time: Float = 0, charging: Bool = false, wheelDegrees: Float = 0,
+                                 headlightsOn: Bool = true, drlOn: Bool = true, brakeLightsOn: Bool = false,
+                                 turnSignalLeftOn: Bool = false, turnSignalRightOn: Bool = false,
+                                 showRoofLightbar: Bool = false) -> ModelSceneData? {
         do {
             if cachedURL != url {
                 let data = try Data(contentsOf: url)
@@ -173,6 +180,15 @@ public class GLBLoader {
                 }
                 return false
             }
+            func lightRole(_ index: Int) -> String? {
+                var i = index
+                var seen = Set<Int>()
+                while i >= 0 && seen.insert(i).inserted {
+                    if let role = (nodes[i]["extras"] as? [String:Any])?["lightRole"] as? String { return role }
+                    i = parents[i]
+                }
+                return nil
+            }
             var activeClips: [(SourceAnimation,Float)] = []
             var requested = selectedAnimations
             if let animation = animation { requested.insert(animation) }
@@ -242,8 +258,12 @@ public class GLBLoader {
             for i in nodes.indices where parents[i] == -1 { visit(i, matrix_identity_float4x4) }
             var scene = ModelSceneData(); scene.animations = animations; scene.textures = cachedTextures
             var minimum = SIMD3<Float>(repeating: .infinity), maximum = -minimum
+            let isCybertruck = url.lastPathComponent.contains("cybertruck")
+            let isSemi = url.lastPathComponent == "semi.glb"
+            let isE41 = url.lastPathComponent == "bayberry_e41.glb"
             for i in nodes.indices where visited.contains(i) {
                 if !charging && effect(i,name:"charging") { continue }
+                if !showRoofLightbar && effect(i,name:"roofLightbar") { continue }
                 guard let mi = nodes[i]["mesh"] as? Int, meshes.indices.contains(mi) else { continue }
                 let w = world[i]
                 let basis = simd_float3x3(SIMD3(w[0].x,w[0].y,w[0].z),SIMD3(w[1].x,w[1].y,w[1].z),SIMD3(w[2].x,w[2].y,w[2].z))
@@ -258,6 +278,8 @@ public class GLBLoader {
                     let normals = attributes["NORMAL"].map { values($0, components:3) } ?? []
                     guard !positions.isEmpty else { continue }
                     var geom = GeometryData(); geom.componentName = paths[i]
+                    if paths[i].contains("BackfaceCull") { geom.textures.w |= 8192 }
+                    var isEmitterSurface = false
                     if let m = prim["material"] as? Int, materials.indices.contains(m) {
                         let mat = materials[m], pbr = mat["pbrMetallicRoughness"] as? [String:Any] ?? [:]
                         let color = floats(pbr["baseColorFactor"]) ?? [0.2,0.2,0.2,1]
@@ -272,8 +294,12 @@ public class GLBLoader {
                         let ao = bindings["ao"] ?? -1
                         geom.textures = SIMD4(Int32(bindings["albedo"] ?? -1),Int32(bindings["mra"] ?? -1),Int32(ao),Int32(aoChannel | ((ex["customAlbedo"] as? Bool ?? false) ? 16 : 0) | ((ex["aoUV2"] as? Bool ?? false) ? 32 : 0)))
                         let category = ex["category"] as? String ?? ""
+                        if category.hasPrefix("interior") && !url.lastPathComponent.contains("legacy") && url.lastPathComponent != "semi.glb" { geom.textures.w |= 131072 }
                         geom.isPaint = category == "paint" ? 1 : 0
                         geom.clearcoat = category == "paint" ? 1 : 0
+                        if isCybertruck && ((ex["originalName"] as? String ?? "").lowercased().contains("stainless") || mat["name"] as? String == "paint__Stainless_Steel" || (mat["name"] as? String ?? "").contains("Stainless_Steel")) {
+                            geom.textures.w |= 2048
+                        }
                         if category == "glass" || category == "glass_tinted" || category == "glass_clear" {
                             // Godot alpha-blend colors are not volumetric absorption.
                             // Keep neutral optical transmission; privacy tint is independent.
@@ -282,7 +308,26 @@ public class GLBLoader {
                             geom.metallic = 0; geom.roughness = 0.035
                             geom.textures = SIMD4(-1,-1,-1,category == "glass_tinted" ? 768 : 256)
                         }
-                        if let e = floats(mat["emissiveFactor"]) { geom.emissive = e.max() ?? 0 }
+                        let sourceProps = ex["sourceProperties"] as? [String:Any] ?? [:]
+                        let cullMode = (sourceProps["params_cull_mode"] as? NSNumber)?.intValue ?? 0
+                        if ex["sourceType"] != nil && cullMode != 2 { geom.textures.w |= cullMode == 1 ? 16384 : 8192 }
+                        geom.emissionTexture = Int32(bindings["emission"] ?? -1)
+                        // A few E41 lamp materials request UV2 on meshes that export
+                        // only UV1. Fall back to their authored UV1 atlas coordinates.
+                        if sourceProps["emission_on_uv2"] as? Bool == true && !uv2s.isEmpty { geom.textures.w |= 4096 }
+                        if let e = floats(mat["emissiveFactor"]), e.count >= 3 {
+                            geom.emissionColor = SIMD3(e[0],e[1],e[2])
+                            geom.emissive = 1
+                        }
+                        if geom.emissionTexture >= 0 { geom.emissionColor = SIMD3(repeating: 1); geom.emissive = 1 }
+                        geom.emissive *= (sourceProps["emission_energy"] as? NSNumber)?.floatValue ?? 1
+                        let originalMaterial = (ex["originalName"] as? String ?? "").lowercased()
+                        isEmitterSurface = geom.emissionTexture >= 0 || sourceProps["emission_enabled"] as? Bool == true
+                            || category == "headlight" || category == "turn_signal" || originalMaterial == "turnsignalus_brakes"
+                        // Cybertruck's luminous atlas is stored as albedo, not emission.
+                        if isCybertruck && category == "headlight" && geom.emissionTexture < 0 {
+                            geom.emissionTexture = geom.textures.x
+                        }
                         let original = (ex["originalName"] as? String ?? "").lowercased()
                         if (category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light")) && !original.contains("lightbar") {
                             // Godot's dark blend color is not absorption in a clear optical lens.
@@ -311,16 +356,70 @@ public class GLBLoader {
                     if simd_determinant(basis) < 0 {
                         for t in stride(from:0,to:geom.indices.count,by:3) { geom.indices.swapAt(t+1,t+2) }
                     }
+                    if paths[i].contains("BackfaceCull") { geom.textures.w |= 8192 }
+                    if geom.sourceMaterial.lowercased().contains("led_strip") {
+                        geom.emissionTexture = -1; geom.emissionColor = SIMD3(repeating: 1); geom.emissive = 1
+                        geom.textures.w |= 65536
+                    }
                     if effect(i,name:"chargeFlow") { geom.isGround = 3 }
-                    let nodeName = nodes[i]["name"] as? String ?? ""
-                    let isBayberryLight = url.lastPathComponent.contains("bayberry") && effect(i, name: "light")
-                    let isCybertruckLightbar = url.lastPathComponent.contains("cybertruck") && (nodeName.contains("Lightbar") || nodeName == "Lights_Hood2")
-                    if isBayberryLight || isCybertruckLightbar {
-                        // Bayberry light strip and Cybertruck lightbar emit realistic bright white light
-                        geom.baseColor = SIMD3(0.96, 0.98, 1.0)
-                        geom.emissive = 2.5
-                        geom.metallic = 0.0
-                        geom.roughness = 0.1
+                    // Only actual source emitter surfaces respond to lamp controls. A lamp
+                    // node may also contain painted covers, chrome bowls and black housings.
+                    var role = lightRole(i)
+                    if role == nil && effect(i,name:"roofLightbar") { role = "roofLightbar" }
+                    // US source variants use the rear brake fixture as the turn signal.
+                    // Prefer a dedicated rear signal wherever the source provides one.
+                    if let current = role, current == "brake_left" || current == "brake_right" {
+                        let side = current == "brake_left" ? "turn_rear_left" : "turn_rear_right"
+                        let dedicated = nodes.indices.contains { lightRole($0)?.split(separator: ",").contains(Substring(side)) == true }
+                        if !dedicated { role = current + "," + side }
+                    }
+                    if isEmitterSurface, let role {
+                        geom.isLampOverlay = true
+                        geom.textures.w |= 524288 // Runtime light overlay, transparent during its dark blink phase.
+                        geom.lightRole = role
+                        func setLamp(_ g: inout GeometryData, rear: Bool) {
+                            let running = headlightsOn || drlOn
+                            let active: Bool
+                            var tint = SIMD3<Float>(repeating: 1)
+                            let roles = Set(role.split(separator: ",").map(String.init))
+                            let brake = roles.contains(where: { $0.hasPrefix("brake_") })
+                            let left = !roles.isDisjoint(with: ["turn_left","turn_rear_left"])
+                            let right = !roles.isDisjoint(with: ["turn_right","turn_rear_right"])
+                            if left { g.textures.w |= 32768 }
+                            if right { g.textures.w |= 262144 }
+                            let sharedRear = (isSemi && brake && !roles.contains("brake_center")) || (isE41 && (left || right) && brake)
+                            if role == "headlights" { active = rear ? running : headlightsOn }
+                            else if brake || left || right {
+                                active = (brake && brakeLightsOn) || (left && turnSignalLeftOn) || (right && turnSignalRightOn) || (sharedRear && running)
+                                tint = brake ? SIMD3(1,0.015,0.005) : SIMD3(1,0.28,0.005)
+                            } else {
+                                switch role {
+                                case "drl": active = drlOn
+                                case "rear_running", "tail_bar", "parking", "rear_running_center": active = running && !(isCybertruck && role == "tail_bar" && brakeLightsOn); tint = SIMD3(1,0.015,0.005)
+                                case "side_marker": active = running; tint = SIMD3(1,0.28,0.005)
+                                case "roofLightbar": active = showRoofLightbar
+                                default: active = false
+                                }
+                            }
+                            // Colored emission atlases retain their own red/amber/white pixels.
+                            // Runtime color is only needed for untextured source emitters.
+                            g.emissionColor = g.emissionTexture >= 0 ? SIMD3(repeating: 1) : tint
+                            g.emissive = active ? ((brake && brakeLightsOn) || (left && turnSignalLeftOn) || (right && turnSignalRightOn) ? 4 : (sharedRear ? 1.2 : 2.4)) : 0
+                        }
+                        if role == "headlights" {
+                            // Some source meshes combine front projectors and rear running
+                            // lamps. Partition their triangles without replacing materials.
+                            var front = geom, rear = geom
+                            front.indices = []; rear.indices = []
+                            for t in stride(from: 0,to: geom.indices.count,by: 3) {
+                                let face = Array(geom.indices[t..<t+3])
+                                let x = face.reduce(Float(0)) { $0 + geom.vertices[Int($1)].position.x } / 3
+                                if x > 0 { front.indices += face } else { rear.indices += face }
+                            }
+                            if !front.indices.isEmpty { setLamp(&front,rear: false); scene.geometries.append(front) }
+                            if !rear.indices.isEmpty { setLamp(&rear,rear: true); rear.lightRole = "rear_running"; scene.geometries.append(rear) }
+                            geom.indices = []
+                        } else { setLamp(&geom,rear: false) }
                     }
                     if let extras = prim["extras"] as? [String:Any],
                        let triangles = extras["windowTrimTriangles"] as? [Int], !triangles.isEmpty {
@@ -339,6 +438,7 @@ public class GLBLoader {
                     if !geom.indices.isEmpty { scene.geometries.append(geom) }
                 }
             }
+            VehicleLighting.calibrateRear(&scene,model: url.lastPathComponent,running: headlightsOn || drlOn,braking: brakeLightsOn)
             guard !scene.geometries.isEmpty else { return nil }
             if restBounds == nil { restBounds = (minimum,maximum) }
             let (restMin,restMax) = restBounds!
@@ -361,6 +461,7 @@ public class GLBLoader {
             let size = restMax-restMin
             scene.boundsMin = restMin-offset; scene.boundsMax = restMax-offset
             scene.center = (restMin+restMax)/2-offset; scene.radius = simd_length(size)/2
+            VehicleLighting.addCabinAccents(&scene,model: url.lastPathComponent)
             scene.totalTriangles = scene.geometries.reduce(0) { $0+$1.indices.count/3 }
             scene.totalVertices = scene.geometries.reduce(0) { $0+$1.vertices.count }
             return scene

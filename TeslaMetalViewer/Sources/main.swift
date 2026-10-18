@@ -39,7 +39,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let presetIndex = CommandLine.arguments.firstIndex(of: "--preset"),
            presetIndex + 1 < CommandLine.arguments.count {
             let p = CommandLine.arguments[presetIndex + 1].lowercased()
-            if p == "rear" { self.appState.initialPreset = .rear }
+            if p == "cabin" { self.appState.initialPreset = .cabin }
+            else if p == "rear" { self.appState.initialPreset = .rear }
             else if p == "front" { self.appState.initialPreset = .front }
             else if p == "side" { self.appState.initialPreset = .side }
             else if p == "top" { self.appState.initialPreset = .top }
@@ -50,6 +51,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.appState.isTouring = true
         }
         
+        if CommandLine.arguments.contains("--validate-lights") {
+            let failures = LightingValidation.run(device: device)
+            print("Lighting validation failures: \(failures)")
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if CommandLine.arguments.contains("--validate-models") {
             var failures: [String] = []
             for model in TeslaCatalog.models {
@@ -181,7 +188,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if zip(visibility,expected).contains(where: { abs($0-$1)>0.001 }) { failures.append("Climate occlusion: \(visibility)") }
                 print("GPU climate visibility (opaque / glass / glass + body / open / behind airflow): \(visibility)")
             } else { failures.append("Climate GPU visibility probe failed") }
-            if MemoryLayout<UniformsGPU>.stride != 400 { failures.append("GPU uniforms layout") }
+            if MemoryLayout<UniformsGPU>.stride != 480 { failures.append("GPU uniforms layout") }
             print("Navigation, tour-preserving model cycling, trim isolation and GPU layout checks passed")
             print("Feature validation failures: \(failures)")
             exit(failures.isEmpty ? 0 : 1)
@@ -192,7 +199,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            renderOutIdx + 1 < CommandLine.arguments.count {
             let outPath = CommandLine.arguments[renderOutIdx + 1]
             let model = appState.selectedModel
-            guard rayTracer.loadModel(filename: model.filename) else { exit(1) }
+            rayTracer.showLightBeams = CommandLine.arguments.contains("--light-beams")
+            let lampsOff = CommandLine.arguments.contains("--lights-off")
+            guard rayTracer.loadModel(filename: model.filename, headlightsOn: !lampsOff, drlOn: !lampsOff,
+                                      brakeLightsOn: CommandLine.arguments.contains("--brake-lights"),
+                                      turnSignalLeftOn: CommandLine.arguments.contains("--signal-left"),
+                                      turnSignalRightOn: CommandLine.arguments.contains("--signal-right")) else { exit(1) }
             func argument(_ name: String) -> String? {
                 guard let i = CommandLine.arguments.firstIndex(of: name), i+1 < CommandLine.arguments.count else { return nil }
                 return CommandLine.arguments[i+1]
@@ -214,6 +226,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             rayTracer.charging = CommandLine.arguments.contains("--charging")
             rayTracer.effectTime = Float(argument("--effect-time") ?? "2") ?? 2
             rayTracer.weatherTime = rayTracer.effectTime
+            rayTracer.cabinBrightness = max(0,min(3,Float(argument("--cabin-brightness") ?? "0.7") ?? 0.7))
+            if let color = argument("--cabin-color"), color.count == 6, let hex = UInt32(color,radix: 16) {
+                rayTracer.cabinColor = SIMD3(pow(Float((hex>>16)&255)/255,2.2),pow(Float((hex>>8)&255)/255,2.2),pow(Float(hex&255)/255,2.2))
+            }
             rayTracer.drivingSpeed = Float(argument("--driving") ?? "0") ?? 0
             rayTracer.climateMode = Float(argument("--climate") ?? "0") ?? 0
             if let clip = argument("--animation") {
@@ -235,6 +251,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             appState.camera.viewportAspect = 1400.0 / 900.0
             let preset = appState.initialPreset ?? .hero
             appState.camera.applyPreset(preset, radius: radius, center: center)
+            if CommandLine.arguments.contains("--rear-straight") {
+                appState.camera.azimuth = -Float.pi/2
+                appState.camera.elevation = 0.10
+            }
+            if CommandLine.arguments.contains("--dump-lights"), let scene = rayTracer.currentScene {
+                let vp = appState.camera.projectionMatrix(aspect: 1400.0/900.0) * appState.camera.viewMatrix()
+                for g in scene.geometries where g.lightRole != nil || (g.textures.w & 65536) != 0 {
+                    var lo = SIMD2<Float>(repeating: .infinity), hi = -lo
+                    for i in g.indices {
+                        let p = vp * g.vertices[Int(i)].position
+                        let screen = SIMD2((p.x/p.w+1)*700,(1-p.y/p.w)*450)
+                        lo = simd_min(lo,screen); hi = simd_max(hi,screen)
+                    }
+                    print(g.componentName, g.lightRole ?? "", "emission",g.emissive,"texture",g.emissionTexture,"pixels",lo,hi)
+                    if g.lightRole == "parking" {
+                        for t in stride(from: 0,to: min(g.indices.count,30),by: 3) {
+                            let indices = Array(g.indices[t..<t+3])
+                            let v = indices.reduce(SIMD4<Float>(repeating: 0)) { $0 + g.vertices[Int($1)].position } / 3
+                            let clip = vp * v
+                            print("parking sample",SIMD2((clip.x/clip.w+1)*700,(1-clip.y/clip.w)*450))
+                        }
+                    }
+                }
+                exit(0)
+            }
             if let picks = argument("--pick"), let scene = rayTracer.currentScene {
                 // CPU ray pick for identifying source surfaces under a render pixel.
                 let invView = appState.camera.viewMatrix().inverse
@@ -257,7 +298,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             let qv = simd_cross(tv,e1), v = simd_dot(dir,qv)/det
                             if v < 0 || u+v > 1 { continue }
                             let dist = simd_dot(e2,qv)/det
-                            if dist > 0.01 { hits.append((dist,"\(g.componentName) | \(g.sourceMaterial) | tr=\(g.transmission) flags=\(g.textures.w) col=\(g.baseColor) met=\(g.metallic) tri=\(tri/3)")) }
+                            if dist > 0.01 { hits.append((dist,"\(g.componentName) | \(g.sourceMaterial) | tr=\(g.transmission) flags=\(g.textures.w) col=\(g.baseColor) met=\(g.metallic) tri=\(tri/3) pos=\(org+dir*dist)")) }
                         }
                     }
                     print("PICK \(xy):")

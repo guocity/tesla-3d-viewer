@@ -14,8 +14,9 @@ public struct ShaderSource {
         float4 normal;
     };
 
-    // 64-byte 16-byte aligned geometry metadata
+    // 80-byte 16-byte aligned geometry metadata
     struct GeometryInfo {
+        float4 emission; // independent emission tint, texture index
         int4 textures;
         uint vertexOffset;
         uint indexOffset;
@@ -25,7 +26,7 @@ public struct ShaderSource {
         float4 params;
     };
 
-    // 400-byte 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
+    // 480-byte 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
     struct Uniforms {
         float4 effectParams;
         int4 effectTextures;
@@ -38,6 +39,11 @@ public struct ShaderSource {
         float4 params;
         uint4 viewport;
         float4 tintParams;
+        float4 cabinLight;
+        float4 rearStrip;
+        float4 rearStripSize;
+        float4 headlampLeft;
+        float4 headlampRight;
         float4 weather; // rain density, surface wetness, weather time, reserved
         float4 renderOptions; // lighting preset, exposure, window trim, lens reflection
     };
@@ -159,20 +165,52 @@ public struct ShaderSource {
         float3 F=fresnelSchlick(dot(v,h),mix(float3(0.04),base,metal));
         return ((1.0-F)*base*(1.0-metal)/3.14159265 + D*gv*gl*F/max(4.0*nv*nl,0.001))*nl;
     }
-    static float3 surfaceRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float2 uv,
+    // Recessed rear-panel wash from the downward-facing parking strip.
+    // Finite width and a tight rear-housing depth keep light off bumper/cabin.
+    static float3 rearPanelLight(float3 p, float3 n, float3 v, float3 base, float metal, float rough, constant Uniforms &u) {
+        if (u.rearStrip.w<=0.0) return float3(0);
+        float3 source=u.rearStrip.xyz;
+        source.z=clamp(p.z,source.z-u.rearStripSize.x,source.z+u.rearStripSize.x);
+        float drop=source.y-p.y;
+        float depth=p.x-source.x;
+        float mask=smoothstep(0.0,0.012,drop)*(1.0-smoothstep(0.035,0.065,drop))
+                  *(1.0-smoothstep(0.08,0.18,abs(depth)))
+                  *(1.0-smoothstep(u.rearStripSize.x,u.rearStripSize.x+0.04,abs(p.z-u.rearStrip.z)));
+        float3 delta=source-p;
+        float distance=max(length(delta),0.015);
+        float3 direction=delta/distance;
+        float down=max(direction.y,0.0);
+        return directBRDF(n,v,direction,base,metal,max(rough,0.45))*float3(1.0,0.004,0.001)
+               *u.rearStrip.w*down*mask*1.8/(0.012+distance*distance);
+    }
+    static float3 emittedLight(GeometryInfo mat, float4 uv, array<texture2d<float>,32> textures, constant Uniforms &u) {
+        if ((mat.textures.w & 65536)!=0) return u.cabinLight.rgb*u.cabinLight.w*mat.params.z*2.0;
+        uint signals=uint(u.effectParams.w);
+        bool indicating=((mat.textures.w & 32768)!=0 && (signals & 2u)!=0)
+                      || ((mat.textures.w & 262144)!=0 && (signals & 4u)!=0);
+        if (indicating && (signals & 1u)==0) return float3(0);
+        float3 e=mat.emission.xyz;
+        if (mat.emission.w>=0.0) {
+            constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
+            float2 coords=(mat.textures.w & 4096)!=0 ? uv.zw : uv.xy;
+            e*=pow(max(textures[int(mat.emission.w)].sample(smp,coords).rgb,0.0),float3(2.2));
+        }
+        return e*mat.params.z;
+    }
+    static float3 surfaceRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float4 uv,
                                   constant Uniforms &u, array<texture2d<float>,32> textures) {
         constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
         applyTrim(mat,u);
         float3 base=mat.isPaint==1 ? u.carPaintColor.xyz : mat.baseColor.xyz;
         if (mat.textures.x>=0 && (mat.textures.w & 16)==0)
-            base*=pow(max(textures[mat.textures.x].sample(smp,uv).rgb,0.0),float3(2.2));
+            base*=pow(max(textures[mat.textures.x].sample(smp,uv.xy).rgb,0.0),float3(2.2));
         float metal=mat.isPaint==1 ? u.carPaintColor.w : mat.baseColor.w;
         float rough=mat.isPaint==1 ? u.params.x : mat.params.x;
         Lighting l=lightingForPreset(u.renderOptions.x);
         float3 env=sampleEnvironment(reflect(-v,n),u.renderOptions.x);
         float3 F=fresnelSchlick(dot(n,v),mix(float3(0.04),base,metal));
         return directBRDF(n,v,normalize(l.keyPosition-p),base,metal,max(rough,sqrt(l.softSize/max(length(l.keyPosition-p),1.0))*0.36))*l.keyColor
-             +base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : float3(mat.params.z));
+             +rearPanelLight(p,n,v,base,metal,rough,u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
     }
 
     // Visibility to the source airflow plane. Transparent interfaces transmit;
@@ -207,6 +245,35 @@ public struct ShaderSource {
         constant GeometryInfo *geometries [[buffer(1)]],
         device float *results [[buffer(2)]], uint id [[thread_position_in_grid]]) {
         if (id < 5) results[id] = airflowVisibility(float3(float(id)*2.0,0,-2),float3(0,0,1),4.0,accel,geometries);
+    }
+
+    // Honor source face culling using the authored normals, including interior
+    // light blockers that must not cover an exterior lamp when seen from behind.
+    static typename intersector<triangle_data>::result_type intersectVisible(
+        ray r, primitive_acceleration_structure accel, device const Vertex *vertices,
+        device const uint *indices, constant GeometryInfo *geometries, constant Uniforms &u) {
+        intersector<triangle_data> tracer;
+        auto h=tracer.intersect(r,accel);
+        for (int layer=0;layer<24 && h.type==intersection_type::triangle;++layer) {
+            GeometryInfo m=geometries[h.geometry_id];
+            uint signal=uint(u.effectParams.w);
+            bool darkIndicator=(m.textures.w & 524288)!=0 && (signal & 1u)==0
+                && (((m.textures.w & 32768)!=0 && (signal & 2u)!=0)
+                 || ((m.textures.w & 262144)!=0 && (signal & 4u)!=0));
+            if (darkIndicator) {
+                r.min_distance=h.distance+0.00001;
+                h=tracer.intersect(r,accel); continue;
+            }
+            if ((m.textures.w & (8192|16384))==0) return h;
+            uint offset=m.indexOffset+h.primitive_id*3;
+            float2 b=h.triangle_barycentric_coord;
+            float3 n=vertices[indices[offset]].normal.xyz*(1.0-b.x-b.y)
+                     +vertices[indices[offset+1]].normal.xyz*b.x+vertices[indices[offset+2]].normal.xyz*b.y;
+            if ((m.textures.w & 16384)!=0 ? dot(n,r.direction)>0.0 : dot(n,r.direction)<0.0) return h;
+            r.min_distance=h.distance+0.0001;
+            h=tracer.intersect(r,accel);
+        }
+        return h;
     }
 
     kernel void raytraceKernel(
@@ -247,7 +314,7 @@ public struct ShaderSource {
         primaryRay.max_distance = 500.0;
 
         intersector<triangle_data> inter;
-        typename intersector<triangle_data>::result_type hit = inter.intersect(primaryRay, accel);
+        typename intersector<triangle_data>::result_type hit = intersectVisible(primaryRay,accel,vertices,indices,geometries,uniforms);
 
         constexpr sampler materialSampler(coord::normalized, address::repeat, filter::linear);
         float3 color = sampleEnvironment(rayDir,uniforms.renderOptions.x);
@@ -320,7 +387,7 @@ public struct ShaderSource {
             shadowRay.min_distance = 0.01;
             shadowRay.max_distance = length(keyLightPos - hitPos);
 
-            typename intersector<triangle_data>::result_type shadowHit = inter.intersect(shadowRay, accel);
+            typename intersector<triangle_data>::result_type shadowHit = intersectVisible(shadowRay,accel,vertices,indices,geometries,uniforms);
             float shadow = (shadowHit.type == intersection_type::none) ? 1.0 : 0.22;
 
             if (mat.isGround == 1) {
@@ -349,7 +416,7 @@ public struct ShaderSource {
                 aoRay.direction = float3(r*cos(phi),sqrt(1.0-r*r),r*sin(phi));
                 aoRay.min_distance = 0.002;
                 aoRay.max_distance = 1.2;
-                auto aoHit = inter.intersect(aoRay, accel);
+                auto aoHit = intersectVisible(aoRay,accel,vertices,indices,geometries,uniforms);
                 float ao = aoHit.type == intersection_type::none ? 1.0 : mix(0.2,1.0,clamp(aoHit.distance/1.2,0.0,1.0));
                 groundBase *= (lighting.ambientColor + lighting.keyColor*NdotL*shadow*0.4) * ao;
 
@@ -380,7 +447,7 @@ public struct ShaderSource {
                 reflRay.min_distance = 0.01;
                 reflRay.max_distance = 50.0;
 
-                typename intersector<triangle_data>::result_type carHit = inter.intersect(reflRay, accel);
+                typename intersector<triangle_data>::result_type carHit = intersectVisible(reflRay,accel,vertices,indices,geometries,uniforms);
                 float3 reflectedColor = sampleEnvironment(reflDir,uniforms.renderOptions.x);
 
                 if (carHit.type == intersection_type::triangle) {
@@ -395,13 +462,29 @@ public struct ShaderSource {
                     float3 cHitPos = reflRay.origin + reflRay.direction * carHit.distance;
 
                     if (dot(cn,reflDir)>0.0) cn=-cn;
-                    float2 cuv=cw*vertices[ci0].uv.xy+cb.x*vertices[ci1].uv.xy+cb.y*vertices[ci2].uv.xy;
+                    float4 cuv=cw*vertices[ci0].uv+cb.x*vertices[ci1].uv+cb.y*vertices[ci2].uv;
                     reflectedColor=surfaceRadiance(carMat,cn,-reflDir,cHitPos,cuv,uniforms,sourceTextures);
                 }
 
                 // Fresnel reflection factor
                 float NdotV = max(dot(float3(0.0, 1.0, 0.0), -rayDir), 0.0);
                 float fresnel = mix(0.08,0.02,wet) + mix(0.92,0.98,wet) * pow(1.0 - NdotV, 5.0);
+
+                if (uniforms.weather.w > 0.5) {
+                    float4 sources[2]={uniforms.headlampLeft,uniforms.headlampRight};
+                    for (int lamp=0;lamp<2;++lamp) {
+                        float3 src=sources[lamp].xyz;
+                        float roadDist=hitPos.x-src.x;
+                        if (sources[lamp].w<0.5 || roadDist<=0.0) continue;
+                        float span=0.35+roadDist*0.25;
+                        float lateral=abs(hitPos.z-src.z)/span;
+                        if (lateral<1.0) {
+                            float3 toGround=hitPos-src;
+                            float visibility=airflowVisibility(src+float3(0.01,0,0),normalize(toGround),length(toGround),accel,geometries);
+                            groundBase+=float3(0.95,0.98,1.0)*(1.0-lateral*lateral)*exp(-roadDist*0.16)/(1.0+roadDist*0.18)*visibility;
+                        }
+                    }
+                }
 
                 float3 groundFinal = mix(groundBase, reflectedColor, groundReflectivity * fresnel);
                 color = mix(sampleEnvironment(rayDir,uniforms.renderOptions.x), groundFinal, vignette);
@@ -437,7 +520,7 @@ public struct ShaderSource {
                 glassReflRay.min_distance = 0.01;
                 glassReflRay.max_distance = 50.0;
 
-                typename intersector<triangle_data>::result_type reflHit = inter.intersect(glassReflRay, accel);
+                typename intersector<triangle_data>::result_type reflHit = intersectVisible(glassReflRay,accel,vertices,indices,geometries,uniforms);
                 float3 reflColor = sampleEnvironment(reflDir,uniforms.renderOptions.x);
                 if (reflHit.type == intersection_type::triangle) {
                     GeometryInfo rMat = geometries[reflHit.geometry_id];
@@ -447,7 +530,7 @@ public struct ShaderSource {
                     float2 bary=reflHit.triangle_barycentric_coord; float rw=1.0-bary.x-bary.y;
                     float3 rn=normalize(ra.normal.xyz*rw+rb.normal.xyz*bary.x+rc.normal.xyz*bary.y);
                     if (dot(rn,reflDir)>0.0) rn=-rn;
-                    float2 ruv=ra.uv.xy*rw+rb.uv.xy*bary.x+rc.uv.xy*bary.y;
+                    float4 ruv=ra.uv*rw+rb.uv*bary.x+rc.uv*bary.y;
                     float3 rp=glassReflRay.origin+reflDir*reflHit.distance;
                     reflColor=rMat.isGround==1 ? lighting.groundColor*(lighting.ambientColor+lighting.keyColor*0.25)
                         : surfaceRadiance(rMat,rn,-reflDir,rp,ruv,uniforms,sourceTextures);
@@ -460,14 +543,14 @@ public struct ShaderSource {
                 transRay.min_distance = 0.0002;
                 transRay.max_distance = 35.0;
 
-                typename intersector<triangle_data>::result_type transHit = inter.intersect(transRay, accel);
+                typename intersector<triangle_data>::result_type transHit = intersectVisible(transRay,accel,vertices,indices,geometries,uniforms);
                 float3 transColor = sampleEnvironment(rayDir,uniforms.renderOptions.x);
                 // Traverse both lens interfaces and any nested clear covers before shading.
                 // Shading a second glass hit as opaque made layered headlamps look black.
                 for (int layer = 0; layer < 8; ++layer) {
                     if (transHit.type != intersection_type::triangle || geometries[transHit.geometry_id].params.w <= 0.01) break;
                     transRay.origin += rayDir * (transHit.distance + 0.0004);
-                    transHit = inter.intersect(transRay, accel);
+                    transHit = intersectVisible(transRay,accel,vertices,indices,geometries,uniforms);
                 }
 
                 if (transHit.type == intersection_type::triangle) {
@@ -499,7 +582,7 @@ public struct ShaderSource {
 
                     // Interior shading: Chrome reflector, LED emitter, or cabin interior
                     if (tEmissive > 0.1) {
-                        transColor = tBase * (1.0 + tEmissive * 2.0);
+                        transColor = emittedLight(tMat,tw*vertices[ti0].uv+tb.x*vertices[ti1].uv+tb.y*vertices[ti2].uv,sourceTextures,uniforms);
                     } else if (tMetallic > 0.75) {
                         // Chrome reflector bowl inside headlight
                         float3 innerRefl = reflect(rayDir, tn);
@@ -510,6 +593,7 @@ public struct ShaderSource {
                         float3 interiorDiffuse = tBase * tNdotL * lighting.keyColor * 0.5;
                         transColor = interiorAmbient + interiorDiffuse;
                     }
+                    transColor += rearPanelLight(tHitPos,tn,viewDir,tBase,tMetallic,tMat.params.x,uniforms);
                 }
 
                 // Attenuate transmitted color by glass tint
@@ -525,7 +609,7 @@ public struct ShaderSource {
 
                 // If transmission < 1.0, blend between opaque surface and transmitted glass
                 float3 opaqueLook = glassTint * 0.1 + reflColor * fresnel;
-                color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec) + float3(mat.params.z);
+                color = mix(opaqueLook, glassBlend, transmission) + float3(glassSpec) + emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms);
             } else {
                 // ============================================================
                 // METALLIC CAR BODY & TESLA DETAILS
@@ -558,7 +642,13 @@ public struct ShaderSource {
 
                 // Secondary ray: Metallic reflection
                 float3 reflDir = reflect(rayDir, normal);
-                if (roughness > 0.02) {
+                bool isStainlessSteel = ((mat.textures.w & 2048) != 0);
+                if (isStainlessSteel) {
+                    // Cold-rolled brushed 30X stainless steel anisotropic/micro-grain perturbation
+                    float grain = (noise2(hitPos.xz * 450.0 + hitPos.y * 120.0) - 0.5) * 0.045;
+                    float3 randOff = float3(rand(seed) - 0.5, rand(seed) - 0.5, rand(seed) - 0.5) * (roughness + grain) * 0.40;
+                    reflDir = normalize(reflDir + randOff);
+                } else if (roughness > 0.02) {
                     float3 randOff = float3(rand(seed) - 0.5, rand(seed) - 0.5, rand(seed) - 0.5) * roughness * 0.35;
                     reflDir = normalize(reflDir + randOff);
                 }
@@ -569,7 +659,7 @@ public struct ShaderSource {
                 carReflRay.min_distance = 0.01;
                 carReflRay.max_distance = 45.0;
 
-                typename intersector<triangle_data>::result_type secHit = inter.intersect(carReflRay, accel);
+                typename intersector<triangle_data>::result_type secHit = intersectVisible(carReflRay,accel,vertices,indices,geometries,uniforms);
                 float3 envRefl = sampleEnvironment(reflDir,uniforms.renderOptions.x);
                 if (secHit.type == intersection_type::triangle) {
                     GeometryInfo secMat = geometries[secHit.geometry_id];
@@ -579,7 +669,7 @@ public struct ShaderSource {
                     float2 sb=secHit.triangle_barycentric_coord; float sw=1.0-sb.x-sb.y;
                     float3 sn=normalize(va.normal.xyz*sw+vb.normal.xyz*sb.x+vc.normal.xyz*sb.y);
                     if (dot(sn,reflDir)>0.0) sn=-sn;
-                    float2 suv=va.uv.xy*sw+vb.uv.xy*sb.x+vc.uv.xy*sb.y;
+                    float4 suv=va.uv*sw+vb.uv*sb.x+vc.uv*sb.y;
                     float3 sp=carReflRay.origin+reflDir*secHit.distance;
                     envRefl=secMat.isGround==1 ? lighting.groundColor*(lighting.ambientColor+lighting.keyColor*0.25)
                         : surfaceRadiance(secMat,sn,-reflDir,sp,suv,uniforms,sourceTextures);
@@ -587,16 +677,19 @@ public struct ShaderSource {
 
                 float NdotV = max(dot(normal, viewDir), 0.001);
                 float3 F0=mix(float3(0.04),baseCol,metallic);
+                if (isStainlessSteel) { F0 = max(F0, float3(0.78, 0.80, 0.82)); }
                 float3 envF=fresnelSchlick(NdotV,F0);
                 float3 direct=directBRDF(normal,viewDir,lightDir,baseCol,metallic,max(roughness,areaRoughness))*lighting.keyColor*shadow;
                 float3 ambient=baseCol*lighting.ambientColor*(1.0-metallic)*materialAO;
-                float3 metalRefl=envRefl*envF*(1.0-roughness*0.5);
+                float3 metalRefl=envRefl*envF*(isStainlessSteel ? (1.0-roughness*0.25) : (1.0-roughness*0.5));
                 if ((mat.textures.w & 128)!=0) { direct*=0.8; metalRefl*=0.05; }
                 float coatF=0.04+0.96*pow(1.0-NdotV,5.0);
                 float3 coat=directBRDF(normal,viewDir,lightDir,float3(0),0.0,max(0.10,areaRoughness))*lighting.keyColor*shadow
                     +sampleEnvironment(reflect(rayDir,normal),uniforms.renderOptions.x)*coatF;
+                direct+=rearPanelLight(hitPos,normal,viewDir,baseCol,metallic,roughness,uniforms);
                 color=(direct+ambient+metalRefl)*(1.0-clearcoat*coatF)+coat*clearcoat
-                     +(mat.isGround==3 ? float3(0.0,0.35,1.0)*emissive : (mat.isGround==4 ? baseCol*emissive : float3(emissive)));
+                     +(mat.isGround==3 ? float3(0.0,0.35,1.0)*emissive : (mat.isGround==4 ? baseCol*emissive : emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms)));
+                if ((mat.textures.w & 131072)!=0) color+=baseCol*uniforms.cabinLight.rgb*uniforms.cabinLight.w*0.12;
                 if (uniforms.renderOptions.x>3.5) {
                     // Colored off-camera practicals provide matching neon highlights.
                     float3 cyanDir=normalize(float3(-1,0.24,0.6));
@@ -632,6 +725,74 @@ public struct ShaderSource {
                 }
             }
         }
+
+        // ============================================================
+        // VOLUMETRIC AUTOMOTIVE HEADLIGHT BEAMS
+        // ============================================================
+        // VOLUMETRIC AUTOMOTIVE HEADLIGHT BEAMS & OPTICAL GLARE
+        // Dual LED projector lamps with atmospheric scattering & lens flare matching reference
+        // ============================================================
+        if (uniforms.weather.w > 0.5) {
+            float maxRayDist = (hit.type == intersection_type::triangle) ? hit.distance : 40.0;
+            float4 beamSources[2]={uniforms.headlampLeft,uniforms.headlampRight};
+            float3 beamAxis = normalize(float3(1.0, -0.05, 0.0)); // Downward road projection
+            float3 beamColor = float3(0.94, 0.97, 1.0); // 6200K pure automotive LED
+
+
+            for (int b = 0; b < 2; ++b) {
+                if (beamSources[b].w<0.5) continue;
+                float3 src = beamSources[b].xyz;
+                float3 delta = rayOrigin - src;
+
+                // Direct lens flare / core bloom when looking towards headlight emitters
+                float3 toEmitter = src - rayOrigin;
+                float distToEmitter = length(toEmitter);
+                if (distToEmitter > 0.1 && distToEmitter <= maxRayDist + 0.15) {
+                    float3 dirToEmitter = toEmitter / distToEmitter;
+                    float lookAlign = dot(rayDir, dirToEmitter);
+                    if (lookAlign > 0.999) {
+                        float glareAngle = (lookAlign - 0.999) / 0.001;
+                        float emitterFacing = dot(-dirToEmitter, beamAxis); // Only visible from front
+                        if (emitterFacing > 0.1) {
+                            float glare = pow(glareAngle, 6.0) * emitterFacing * 1.8;
+                            float starburst = pow(glareAngle, 18.0) * 2.5;
+                            color += beamColor * (glare + starburst) / (1.0 + distToEmitter * 0.18)
+                                *airflowVisibility(rayOrigin,dirToEmitter,distToEmitter,accel,geometries);
+                        }
+                    }
+                }
+
+                // Ray-marched volumetric forward beam cone
+                float d12 = dot(rayDir, beamAxis);
+                float det = 1.0 - d12 * d12;
+                if (det > 0.001) {
+                    float tRay = (dot(beamAxis, delta) * d12 - dot(rayDir, delta)) / det;
+                    float tBeam = dot(rayDir, beamAxis) * tRay + dot(beamAxis, delta);
+                    tRay = clamp(tRay, 0.2, maxRayDist);
+                    if (tBeam > 0.05 && tBeam < 20.0) {
+                        float3 pRay = rayOrigin + rayDir * tRay;
+                        float3 pBeam = src + beamAxis * tBeam;
+                        float distToCore = length(pRay - pBeam);
+
+                        // Realistic wide headlight beam cone expansion
+                        float coneRadius = 0.08 + tBeam * 0.22;
+                        if (distToCore < coneRadius) {
+                            float profile = 1.0 - smoothstep(0.0, coneRadius, distToCore);
+                            profile = profile * profile; // Gaussian radial falloff
+                            float distanceAttenuation = exp(-tBeam * 0.22) / (1.0 + tBeam * 0.12);
+                            float beamVisibility=airflowVisibility(src+beamAxis*0.01,normalize(pRay-src),length(pRay-src),accel,geometries);
+                            float beamIntensity = profile * distanceAttenuation * 0.25*beamVisibility;
+
+                            // Forward Mie scattering phase function
+                            float cosTheta = dot(rayDir, beamAxis);
+                            float mie = 0.6 + 0.8 * pow(max(cosTheta, 0.0), 3.5);
+                            color += beamColor * beamIntensity * mie;
+                        }
+                    }
+                }
+            }
+        }
+
 
         if (uniforms.renderOptions.x > 3.5) {
             float distance=hit.type==intersection_type::triangle ? hit.distance : 100.0;

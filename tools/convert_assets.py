@@ -21,7 +21,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 EXTRACTED_ROOT = Path(os.environ.get("TESLA_EXTRACTED_ROOT", str(ROOT / "extracted_models")))
-REA_GODOT_ROOT = Path(os.environ.get("TESLA_GODOT_ROOT", str(EXTRACTED_ROOT)))
+PRESERVED_GODOT_ROOT = ROOT / "analysis/com.teslamotors.tesla/4.61.6/raw/godot"
+REA_GODOT_ROOT = Path(os.environ.get("TESLA_GODOT_ROOT", str(PRESERVED_GODOT_ROOT if PRESERVED_GODOT_ROOT.exists() else EXTRACTED_ROOT)))
+INLINE_MATERIALS = {}
 OUT_DIR = ROOT / "tesla-3d-viewer" / "models"
 
 
@@ -381,7 +383,8 @@ def decode_surface(surf: dict):
 def classify_pbr_material(mat_name: str, node_name: str = "") -> dict:
     """Map Tesla Godot material names to physically based glTF 2.0 material parameters."""
     source_path = mat_name
-    mat_name = Path(mat_name).stem
+    source = read_source_material(source_path)
+    mat_name = source[0].get("resource_name", Path(mat_name).stem) if source_path in INLINE_MATERIALS else Path(mat_name).stem
     key = mat_name.lower()
 
     # Default PBR
@@ -540,6 +543,8 @@ def classify_pbr_material(mat_name: str, node_name: str = "") -> dict:
 
 @lru_cache(maxsize=None)
 def read_source_material(source_path):
+    if source_path in INLINE_MATERIALS:
+        return INLINE_MATERIALS[source_path]
     path = resolve_res_path(source_path)
     if not path:
         return None
@@ -554,8 +559,10 @@ def read_source_material(source_path):
                 ref = re.search(r"\d+",value)
                 if ref: props[key] = refs.get(int(ref.group()))
             else:
-                try: props[key] = float(value)
-                except ValueError: pass
+                if value in ("true", "false"): props[key] = value == "true"
+                else:
+                    try: props[key] = float(value)
+                    except ValueError: pass
         return props, "SpatialMaterial"
     parsed = parse_rsrc_file(path)
     resource = parsed["resources"][parsed["main_id"]]
@@ -569,8 +576,27 @@ def read_source_material(source_path):
 LIGHT_PATH_ROLES = {
     "drl_path": "drl",
     "headlights_path": "headlights",
+    "headlight_front_original_path": "headlights",
+    "headlight_rear_original_path": "rear_running",
+    "left_turn_signal_front_original_path": "turn_left", "right_turn_signal_front_original_path": "turn_right",
+    "left_turn_signal_rear_original_path": "turn_rear_left", "right_turn_signal_rear_original_path": "turn_rear_right",
+    "drl_left_path": "drl", "drl_right_path": "drl",
+    "highbeam_left_path": "headlights", "highbeam_right_path": "headlights",
     "park_light_rear_path": "parking",
+    "brake_lights_l_path": "brake_left",
+    "brake_lights_r_path": "brake_right",
+    "brake_lights_center_path": "brake_center",
+    "headlights_trunk_path": "tail_bar",
+    "headlight_trunk_path": "tail_bar",
+    "turn_signal_l_path": "turn_left",
+    "turn_signal_r_path": "turn_right",
+    "turn_signal_rear_l_path": "turn_rear_left",
+    "turn_signal_rear_r_path": "turn_rear_right",
+    "headlights_side_left_path": "side_marker",
+    "headlights_side_right_path": "side_marker",
 }
+
+
 
 
 def should_skip_node(node_name: str, hidden_set: set[str]) -> bool:
@@ -644,6 +670,25 @@ def parse_tscn_metadata(tscn_path: Path | None):
     for m in re.finditer(r'\[ext_resource path="([^"]+)" type="([^"]+)" id=(\d+)\]', txt):
         info["ext_res"][int(m.group(3))] = (m.group(2), m.group(1))
 
+    inline_refs = {}
+    for kind, aid, body in re.findall(r'\[sub_resource type="(ShaderMaterial|SpatialMaterial)" id=(\d+)\]([^\[]*)', txt):
+        props = {}
+        for key, value in re.findall(r"^([\w/]+) = (.+)$", body, re.M):
+            if value.startswith("Color("):
+                props[key] = [float(x) for x in value[6:-1].split(",")]
+            elif value.startswith("ExtResource"):
+                ref = re.search(r"\d+",value)
+                if ref and int(ref.group()) in info["ext_res"]: props[key] = info["ext_res"][int(ref.group())][1]
+            elif value in ("true", "false"): props[key] = value == "true"
+            elif value.startswith('"'): props[key] = value.strip('"')
+            else:
+                try: props[key] = float(value)
+                except ValueError: pass
+        relative = tscn_path.relative_to(EXTRACTED_ROOT) if tscn_path.is_relative_to(EXTRACTED_ROOT) else tscn_path.relative_to(REA_GODOT_ROOT)
+        source_path = "res://" + str(relative) + "::material_" + aid
+        INLINE_MATERIALS[source_path] = (props, kind)
+        inline_refs[int(aid)] = source_path
+
     sub_anims = {}
     for sec in txt.split("\n["):
         lines = sec.splitlines()
@@ -679,9 +724,12 @@ def parse_tscn_metadata(tscn_path: Path | None):
                 info["node_meshes"][nm] = int(m_mesh.group(1))
 
             mat_ovr = {}
-            for m_mat in re.finditer(r"material/(\d+)\s*=\s*ExtResource\(\s*(\d+)\s*\)", sec_body):
+            for m_mat in re.finditer(r"material/(\d+)\s*=\s*(ExtResource|SubResource)\(\s*(\d+)\s*\)", sec_body):
                 s_idx = int(m_mat.group(1))
-                er_id = int(m_mat.group(2))
+                er_id = int(m_mat.group(3))
+                if m_mat.group(2) == "SubResource":
+                    if er_id in inline_refs: mat_ovr[s_idx] = inline_refs[er_id]
+                    continue
                 if er_id in info["ext_res"]:
                     mat_ovr[s_idx] = info["ext_res"][er_id][1]
             if mat_ovr:
@@ -710,13 +758,19 @@ def parse_tscn_metadata(tscn_path: Path | None):
                     info["brake_mounts"].append((parent_str, nm, t_vals))
 
     # The vehicle script toggles these hidden-by-default lamp meshes at runtime
-    # (VehicleManager set_headlights_on, DRL, parking lights). For Bayberry (Model Y Juniper refresh),
-    # keep them so the distinctive full front light strip and rear bar are modeled.
-    if tscn_path and "bayberry" in tscn_path.name.lower():
+    # (VehicleManager set_headlights_on, DRL, parking lights, brake lights).
+    # Keep them so all vehicle models have their authentic lamps and light paths.
+    if tscn_path:
         for key, role in LIGHT_PATH_ROLES.items():
             for m in re.finditer(rf'^{key} = NodePath\("([^"]+)"\)', txt, re.MULTILINE):
-                info["light_nodes"][m.group(1).split("/")[-1]] = role
+                name = m.group(1).split("/")[-1]
+                roles = info["light_nodes"].get(name, "").split(",")
+                info["light_nodes"][name] = ",".join(dict.fromkeys(r for r in roles + [role] if r))
 
+    # E41 stores the outer rear running circuits as a hidden Brake_Light
+    # mesh, independently from the two side US brake/indicator fixtures.
+    if tscn_path and "BayberryE41" in str(tscn_path):
+        info["light_nodes"]["Brake_Light"] = "rear_running"
     return info
 
 
@@ -758,15 +812,21 @@ class GLBBuilder:
         if source:
             props, _ = source
             bindings = {}
-            for role, prop in [("albedo", "albedo_texture"), ("mra", "metallic_texture"), ("ao", "ao_texture")]:
+            for role, prop in [("albedo", "albedo_texture"), ("mra", "metallic_texture"), ("ao", "ao_texture"), ("emission", "emission_texture")]:
                 path = props.get(prop, props.get("shader_param/custom_albedo_texture") if role == "albedo" else None)
                 if not isinstance(path, str): continue
                 texture = self.add_source_texture(path)
-                if texture is not None: bindings[role] = texture
+                if texture is None:
+                    raise RuntimeError(f"Cannot export required {role} texture {path} for {mat_name}. Restore the complete Godot extract or set TESLA_GODOT_ROOT; refusing to write textureless assets.")
+                bindings[role] = texture
+            if props.get("shader") == "res://shaders/opaque_skybox.shader" and isinstance(props.get("shader_param/ao"), str):
+                texture = self.add_source_texture(props["shader_param/ao"])
+                if texture is None: raise RuntimeError("Missing paint AO texture: " + props["shader_param/ao"])
+                bindings["ao"] = texture
             mat_def["extras"]["customAlbedo"] = "shader_param/custom_albedo_texture" in props
             mat_def["extras"]["textures"] = bindings
             mat_def["extras"]["aoUV2"] = bool(props.get("ao_on_uv2", False))
-            mat_def["extras"]["aoChannel"] = int(props.get("ao_texture_channel", 0))
+            mat_def["extras"]["aoChannel"] = int(props.get("ao_texture_channel", 2 if props.get("shader") == "res://shaders/opaque_skybox.shader" else 0))
         idx = len(self.materials)
         self.materials.append(mat_def)
         self.mat_cache[key] = idx
@@ -791,6 +851,16 @@ class GLBBuilder:
             offset = data.index(b"RIFF")
             size = struct.unpack_from("<I", data, offset+4)[0]+8
             raw = data[offset:offset+size]; encoding = "webp"
+        elif code in (6,7): # Godot RGBA4444 / RGB565, stored as little-endian 16-bit pixels.
+            from PIL import Image
+            import io
+            pixels = np.frombuffer(data,dtype="<u2",count=width*height,offset=20).reshape(height,width)
+            if code == 6:
+                rgba = np.stack([((pixels >> shift) & 15)*17 for shift in (12,8,4,0)],axis=-1).astype(np.uint8)
+            else:
+                rgba = np.stack([((pixels>>11)&31)*255//31,((pixels>>5)&63)*255//63,(pixels&31)*255//31,np.full_like(pixels,255)],axis=-1).astype(np.uint8)
+            stream=io.BytesIO(); Image.fromarray(rgba).save(stream,format="PNG")
+            raw=stream.getvalue();encoding="png"
         elif code in (0,1,2,3,4,5):
             from PIL import Image
             import io
@@ -855,6 +925,9 @@ class GLBBuilder:
                     elif 1 <= er_idx <= len(ext_res):
                         mat_name = ext_res[er_idx - 1][1]
 
+            source_material = read_source_material(mat_name)
+            if source_material and source_material[0].get("params_blend_mode") == 1 and source_material[0].get("flags_unshaded") and not source_material[0].get("emission_enabled"):
+                continue
             mat_idx = self.get_or_create_material(mat_name, node_name)
 
             # Position accessor
@@ -993,7 +1066,7 @@ class GLBBuilder:
             nm = names[name_id]
             light_nodes = tscn_info.get("light_nodes", {}) if tscn_info else {}
             hidden = nm in hidden_set or nprops.get("visible") is False
-            role = light_nodes.get(nm) if hidden else None
+            role = light_nodes.get(nm)
             if role is None and parent in light_godot_roles:
                 role = light_godot_roles[parent]
             if role is not None and parent not in skipped_godot_indices \
@@ -1114,10 +1187,16 @@ def build_legacy_tscn_vehicle(tscn_path: Path, wheel_scn: Path, out_glb: Path) -
         parent_name = parent_path.split("/")[-1] if parent_path != "." else "."
         if parent_name not in name_to_node:
             continue
-        if should_skip_node(nm, tscn_info["hidden_nodes"]):
+        role = tscn_info["light_nodes"].get(nm)
+        if role is not None:
+            pass  # Keep authentic light node
+        elif should_skip_node(nm, tscn_info["hidden_nodes"]):
             continue
 
         n_def = {"name": nm}
+        if role is not None:
+            n_def["extras"] = {"effect": "light", "lightRole": role}
+
         t_vals = tscn_info["node_transforms"].get((parent_path, nm), tscn_info["node_transforms"].get(nm))
         if t_vals:
             n_def["matrix"] = godot_transform_to_gltf_matrix(t_vals)
@@ -1200,7 +1279,10 @@ def build_vehicle_glb(
         for att_scn, att_name in extra_attachments:
             if att_scn.exists():
                 att_holder = len(builder.nodes)
-                builder.nodes.append({"name": att_name})
+                n_def = {"name": att_name}
+                if att_name == "Roof_Lightbar":
+                    n_def["extras"] = {"effect": "roofLightbar"}
+                builder.nodes.append(n_def)
                 builder.nodes[car_root].setdefault("children", []).append(att_holder)
                 builder.add_scn_to_tree(att_scn, parent_gltf_node=att_holder)
 

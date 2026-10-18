@@ -15,6 +15,12 @@ Before investigating a car artifact, read [the APK source guide](../SOURCES.md) 
 - Light covers use neutral 100% optical transmission and adjustable reflection (15% of the ordinary glass Fresnel response by default) and traverse nested lens shells, so the source light assemblies remain visible. Rubber uses a matte, nonmetallic finish with a subdued reflection lobe. These are viewer material calibrations; APK resource bindings remain intact.
 - Area-light sampling produces soft ray-traced shadows; ground occlusion supplies tire contact shadows. Progressive rendering resumes after camera movement stops.
 
+## Lighting and material repair
+
+The source texture pipeline, Semi inline paint override, and Palladium tire textures are restored. Lamp controls use separate emission colors and source emission atlases, preserving body paint and black trim. Rear running lamps and original indicator paths are exported for S/X, and E41 split DRLs/high beams are retained. See the [Git/source review](../evidence/lighting-material-review.md) and its front/rear review sheets.
+
+`--validate-lights` checks all vehicles in five lamp states and verifies that their surface materials remain unchanged. Offscreen exports support `--lights-off`, `--brake-lights`, `--signal-left`, `--signal-right`, and optional `--light-beams`. `--dump-lights` prints source emitter locations for diagnosis. Headlight beams use source lamp positions independently of paint choice.
+
 ## Controls
 
 Two-finger motion or left/middle drag orbits. Hold Shift to pan; right drag also pans. Pinch, mouse wheel, or Control + two fingers zooms. Gestures keep their initial mode until release, ignore trackpad momentum, and scale pan speed to distance and viewport size. Next Model in the header cycles through vehicles and wraps at the end. During a tour it preserves the tour clock and stage, adapting the camera to the next vehicle. Fit and the five camera presets frame the vehicle. The Tour button and Camera tour inspector restore the cinematic walkthrough, with speed, progress, and restart controls. Manual navigation stops camera automation. A persistent inspector contains model, paint, source-animation, runtime-effect and floor controls, plus a component/material audit. Airflow uses the source planes and noise, with ray-traced visibility: opaque panels block it, glass transmits it, and a panel behind glass still blocks it. Charging opens the source charge-port clip and shows the US cable when that anchor exists.
@@ -74,3 +80,22 @@ Pass comma-separated clip names to `--animation` to render simultaneous clips, f
 This is a Metal translation of Godot assets and selected runtime shaders, not Tesla's Godot renderer. It retains source material bindings, scalar PBR values, texture maps, geometry, pivots and supported transform/value tracks. Normal maps, arbitrary Godot shaders, FSD/rainbow/terrain logic, regional charging connectors and every configuration variant are not implemented. The studio lighting and tone mapping are viewer features. Source codenames are shown without assigning speculative trim specifications.
 
 The legacy browser viewer shares the corrected material metadata and keyframe data; the complete runtime-effect implementation and native inspector are in this Metal app.
+
+## Bayberry optics, blinking indicators and cabin accents
+
+Bayberry and E80 retain the authored downward-facing parking emitter. A finite red light wash illuminates the recessed TESLA panel beneath the upper lip, with a narrow vertical falloff that keeps the body below dark. This is an analytic area-light approximation; the parking strip is not replaced by an outward-facing ribbon. Bayberry and E80 rear turn emitters are red. Source variants without dedicated rear indicator geometry use their left/right red brake fixtures, preserving source placement and materials. E41’s coplanar emitter is separated from its optical cover by 2 mm to avoid transmission-ray self-intersection.
+
+Indicators blink at 80 cycles/minute with a 50% duty cycle, start immediately when selected, and share a synchronized clock when both sides are enabled. Brake-only operation stays steady on shared brake/indicator fixtures. Progressive accumulation resets at phase changes to avoid ghosting.
+
+**Cabin accent lighting** provides on/off, a color picker, brightness, and **View cabin**. The refreshed Model 3 uses its actual dashboard/door `LED_Strip` surfaces. Other non-legacy passenger models and Cybertruck use added narrow viewer accent ribbons fitted to the cabin and doorcards; these are customization geometry, not a claim that every extracted trim has factory RGB strips. Exterior paint and trim bindings are untouched.
+
+```sh
+.build/release/TeslaMetalViewer --model bayberry --preset rear --signal-left --effect-time 0.1 --render-out /tmp/indicator-on.png
+.build/release/TeslaMetalViewer --model bayberry --preset rear --signal-left --effect-time 0.5 --render-out /tmp/indicator-off.png
+.build/release/TeslaMetalViewer --model poppyseed --preset cabin --cabin-color ff0066 --cabin-brightness 1.5 --render-out /tmp/cabin.png
+python3 ../tools/render_lamp_effects.py
+```
+
+`tools/render_lamp_effects.py` renders both rear blink phases independently on both sides of all 12 vehicles from directly behind. It checks visible fixture changes on the selected side, rejects opposite-side blinking, and separately checks indirect Bayberry panel lighting, steady brakes and cabin colors. `--rear-straight` selects this diagnostic camera during offscreen export.
+
+Rear circuit corrections: E41 exports the hidden authored `Brake_Light` mesh for its outer running circuits and adds a narrow center diffuser fitted to the authored rear panel, because this source trim omits the center emitter. Cybertruck corner lamps split at the continuous running bar’s lower edge: upper running sections stay steady during signaling and turn off together with the upper bar during braking; lower sections carry turn/brake emission. Dark-phase signal overlays transmit rays so Model S’s steady running outline is not covered by a black signal mesh.
