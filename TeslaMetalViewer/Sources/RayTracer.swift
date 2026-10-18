@@ -29,6 +29,7 @@ public struct UniformsGPU {
     public var interiorFinish: SIMD4<Float> = .zero
     public var rearStrip = SIMD4<Float>(repeating: 0)
     public var rearStripSize = SIMD4<Float>(repeating: 0)
+    public var rearStripDepths = matrix_float4x4()
     public var headlampLeft = SIMD4<Float>(repeating: 0)
     public var headlampRight = SIMD4<Float>(repeating: 0)
     public var weather = SIMD4<Float>(0.65,0.85,0,0)
@@ -94,6 +95,7 @@ public class RayTracer {
     public private(set) var headlampPositions = [SIMD4<Float>(repeating: 0),SIMD4<Float>(repeating: 0)]
     private var rearStrip = SIMD4<Float>(repeating: 0)
     private var rearStripSize = SIMD4<Float>(repeating: 0)
+    private var rearStripDepths = matrix_float4x4()
     private var lastTintParams: SIMD4<Float> = .zero
 
     public init(device: MTLDevice) {
@@ -246,17 +248,43 @@ public class RayTracer {
             let points = lamp.indices.map { lamp.vertices[Int($0)].position }
             var lo = SIMD3<Float>(repeating: .infinity), hi = -lo
             for v in points { let p = SIMD3(v.x,v.y,v.z); lo = simd_min(lo,p); hi = simd_max(hi,p) }
-            // Sample the upper recess lip: the source card extends into the
-            // housing, while its effective aperture must sit above the receiver.
-            var lip = lo.x
-            let span = (hi.z-lo.z)*0.4
-            for g in scene.geometries where g.componentName.contains("Trunk_Cover") {
-                for index in g.indices {
-                    let p = g.vertices[Int(index)].position
-                    if p.y < lo.y && p.y > lo.y-0.06 && abs(p.z) < span { lip = min(lip,p.x) }
-                }
+            // Sample cross-sections of the upper recess, rather than using its
+            // center depth for the whole width. Juniper's ends curve forward.
+            let panels = scene.geometries.filter {
+                $0.componentName.contains("Trunk_Cover") && $0.transmission < 0.1
             }
-            rearStrip = SIMD4(min(lo.x,lip)-0.003,lo.y,(lo.z+hi.z)/2,lamp.emissive)
+            for sample in 0..<16 {
+                // Avoid degeneracies exactly on the outermost triangle edges.
+                let z = lo.z + (hi.z-lo.z) * (0.0001 + 0.9998*Float(sample)/15)
+                var lip = Float.infinity
+                for g in panels {
+                    for t in stride(from: 0, to: g.indices.count, by: 3) {
+                        let triangle = (0..<3).map { g.vertices[Int(g.indices[t+$0])].position }
+                        var section: [SIMD4<Float>] = []
+                        for k in 0..<3 {
+                            let a = triangle[k], b = triangle[(k+1)%3]
+                            if (a.z <= z && b.z > z) || (b.z <= z && a.z > z) {
+                                section.append(a+(b-a)*((z-a.z)/(b.z-a.z)))
+                            }
+                        }
+                        guard section.count == 2 else { continue }
+                        let a = section[0], b = section[1]
+                        // Clip the section to the narrow receiver band below
+                        // the source. This excludes the bumper and upper trim.
+                        for p in section where p.y < lo.y && p.y > lo.y-0.06 {
+                            lip = min(lip,p.x)
+                        }
+                        if abs(b.y-a.y) > 0.000001 {
+                            for y in [lo.y-0.001,lo.y-0.059] {
+                                let f = (y-a.y)/(b.y-a.y)
+                                if f >= 0 && f <= 1 { lip = min(lip,a.x+(b.x-a.x)*f) }
+                            }
+                        }
+                    }
+                }
+                rearStripDepths[sample/4][sample%4] = (lip.isFinite ? lip : lo.x)-0.003
+            }
+            rearStrip = SIMD4(lo.x,lo.y,(lo.z+hi.z)/2,lamp.emissive)
             rearStripSize = SIMD4((hi.z-lo.z)/2,0,0,0)
         }
         let canRefit = builtTopology == scene.topologyID && builtLighting == lighting
@@ -515,6 +543,7 @@ public class RayTracer {
         var uniforms = UniformsGPU()
         let beamsActive: Float = (headlightsOn && showLightBeams) ? 1.0 : 0.0
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
+        uniforms.rearStripDepths = rearStripDepths
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,beamsActive)
         uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)
@@ -632,6 +661,7 @@ public class RayTracer {
 
         var uniforms = UniformsGPU()
         uniforms.rearStrip = rearStrip; uniforms.rearStripSize = rearStripSize
+        uniforms.rearStripDepths = rearStripDepths
         uniforms.headlampLeft = headlampPositions[0]; uniforms.headlampRight = headlampPositions[1]
         uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,(headlightsOn && showLightBeams) ? 1 : 0)
         uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)

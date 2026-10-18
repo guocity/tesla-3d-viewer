@@ -26,7 +26,7 @@ public struct ShaderSource {
         float4 params;
     };
 
-    // 480-byte 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
+    // 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
     struct Uniforms {
         float4 effectParams;
         int4 effectTextures;
@@ -42,6 +42,7 @@ public struct ShaderSource {
         float4 interiorFinish;
         float4 rearStrip;
         float4 rearStripSize;
+        float4x4 rearStripDepths;
         float4 headlampLeft;
         float4 headlampRight;
         float4 weather; // rain density, surface wetness, weather time, reserved
@@ -216,6 +217,9 @@ public struct ShaderSource {
         if (u.rearStrip.w<=0.0) return float3(0);
         float3 source=u.rearStrip.xyz;
         source.z=clamp(p.z,source.z-u.rearStripSize.x,source.z+u.rearStripSize.x);
+        float along=clamp((source.z-u.rearStrip.z+u.rearStripSize.x)/(2.0*u.rearStripSize.x),0.0,1.0)*15.0;
+        uint a=min(uint(along),14u), b=a+1u;
+        source.x=mix(u.rearStripDepths[a/4u][a%4u],u.rearStripDepths[b/4u][b%4u],along-float(a));
         float drop=source.y-p.y;
         float depth=p.x-source.x;
         float mask=smoothstep(0.0,0.012,drop)*(1.0-smoothstep(0.035,0.065,drop))

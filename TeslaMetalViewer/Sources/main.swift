@@ -230,7 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if zip(visibility,expected).contains(where: { abs($0-$1)>0.001 }) { failures.append("Climate occlusion: \(visibility)") }
                 print("GPU climate visibility (opaque / glass / glass + body / open / behind airflow): \(visibility)")
             } else { failures.append("Climate GPU visibility probe failed") }
-            if MemoryLayout<UniformsGPU>.stride != 480 { failures.append("GPU uniforms layout") }
+            if MemoryLayout<UniformsGPU>.stride != 544 { failures.append("GPU uniforms layout") }
             print("Navigation, tour-preserving model cycling, trim isolation and GPU layout checks passed")
             print("Feature validation failures: \(failures)")
             exit(failures.isEmpty ? 0 : 1)
