@@ -1,0 +1,14 @@
+{
+  "package": "com.teslamotors.tesla",
+  "version": "4.61.6 (4647)",
+  "godotRootFromViewer": "../analysis/com.teslamotors.tesla/4.61.6/raw/godot",
+  "organizedExtractFromViewer": "../extracted_models",
+  "apkmFromViewer": "../apk/com.teslamotors.tesla_4.61.6-4647-4647_1arch_7dpi_24lang_1feat_15e99b04241942c48c066c4afe62f5d9_apkmirror.com.apkm",
+  "sourceArchiveMember": "split_assets_pack.apk/assets/godot",
+  "provenance": "evidence/rea-extraction.json",
+  "preservationDate": "2026-10-18",
+  "filesVerified": 4397,
+  "bytesVerified": 456127688,
+  "verification": "SHA-256 comparison of every preserved file against the existing REA extract; no resource transformations",
+  "gitStatus": "Raw Godot files and APKM are local, ignored inputs; regenerate from the supplied APKM if missing."
+}

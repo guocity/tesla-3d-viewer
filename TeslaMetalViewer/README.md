@@ -2,6 +2,8 @@
 
 Native SwiftUI + Metal ray tracing viewer for the 12 vehicle scenes extracted from Tesla Android 4.61.6. Run `../launch_metal_viewer.sh` from this directory, or open `TeslaMetalViewer.app`. The launch script rebuilds the executable and refreshes bundled models.
 
+Before investigating a car artifact, read [the APK source guide](../SOURCES.md) for the stable decoded-resource location, original scene/material/animation files, and how to regenerate missing extracts. Full Java/Kotlin decompilation is usually unnecessary for vehicle rendering issues.
+
 ## What changed
 
 - Materials follow each source surface's resource path and instance override. Window, chrome, paint, rubber, and interior assignments no longer depend on mesh-name guesses or hardcoded triangle regions.

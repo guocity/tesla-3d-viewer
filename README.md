@@ -5,3 +5,5 @@ Start the native Metal viewer with `./launch_metal_viewer.sh`. See [the native v
 [Source material and animation audit](models/source-audit.json) · [REA extraction provenance](evidence/rea-extraction.json)
 
 The repository also retains the earlier Three.js browser viewer. The native macOS app is the primary viewer.
+
+For future artifact fixes, start with [APK source locations and troubleshooting](SOURCES.md). It identifies the preserved complete Godot extract, original APKM, component/material audit, decoding limits, and rebuild steps.
