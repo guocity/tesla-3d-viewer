@@ -35,6 +35,13 @@ public struct SourceAnimation: Identifiable {
     public var id: String { name }
     public let name: String
     public let duration: Float
+    public let playbackSpeed: Float
+    public var sourceDuration: Float { duration*playbackSpeed }
+    public var displayName: String {
+        if name == "TonneauAnimation" { return "Tonneau bed cover" }
+        if name == "SpoilerAnimation" { return "Active rear spoiler" }
+        return name.replacingOccurrences(of: "Animation",with: "")
+    }
     public let tracks: [[String: Any]]
     public let root: String
 }
@@ -112,8 +119,9 @@ public class GLBLoader {
             guard cachedTextures.count <= 32 else { print("Too many source textures"); return nil }
             let animations = (extras["sourceAnimations"] as? [[String: Any]] ?? []).compactMap { item -> SourceAnimation? in
                 guard let name = item["name"] as? String, let tracks = item["tracks"] as? [[String: Any]] else { return nil }
-                return SourceAnimation(name: name, duration: (item["duration"] as? NSNumber)?.floatValue ?? 1,
-                                       tracks: tracks, root: item["root"] as? String ?? ".")
+                let speed = max(0.001,(item["playbackSpeed"] as? NSNumber)?.floatValue ?? 1)
+                return SourceAnimation(name: name, duration: ((item["duration"] as? NSNumber)?.floatValue ?? 1)/speed,
+                                       playbackSpeed: speed, tracks: tracks, root: item["root"] as? String ?? ".")
             }
             // Validate each accessor span before accessing bytes, including strided attributes.
             func values(_ index: Int, components: Int) -> [[Float]] {
@@ -195,9 +203,9 @@ public class GLBLoader {
             var activeClips: [(SourceAnimation,Float)] = []
             var requested = selectedAnimations
             if let animation = animation { requested.insert(animation) }
-            for clip in animations where requested.contains(clip.name) { activeClips.append((clip,min(time,clip.duration))) }
+            for clip in animations where requested.contains(clip.name) { activeClips.append((clip,min(time*clip.playbackSpeed,clip.sourceDuration))) }
             if charging, let port = animations.first(where: { $0.name.lowercased().contains("chargeport") }), !requested.contains(port.name) {
-                activeClips.append((port,port.duration))
+                activeClips.append((port,port.sourceDuration))
             }
             for (clip,clipTime) in activeClips {
                 for track in clip.tracks {
@@ -223,6 +231,8 @@ public class GLBLoader {
                         var m = simd_matrix4x4(simd_slerp(q0,q1,f))
                         m = m * simd_float4x4(diagonal: SIMD4(v[7],v[8],v[9],1))
                         m.columns.3 = SIMD4(v[0],v[1],v[2],1); local[index] = m
+                    } else if parts.count == 2, parts[1] == "transform", a.count == 12 {
+                        local[index] = SourceTransform.interpolate(a,b,fraction: f)
                     } else if parts.count == 2, v.count == 3 {
                         if parts[1] == "rotation_degrees" || parts[1] == "rotation" {
                             let factor: Float = parts[1] == "rotation_degrees" ? .pi / 180 : 1

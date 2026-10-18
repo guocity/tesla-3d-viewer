@@ -57,7 +57,7 @@ public struct ContentView: View {
                                 ScrollView {
                                     LazyVStack(alignment: .leading, spacing: 8) {
                                         ForEach(state.animations) { clip in
-                                            Toggle(clip.name.replacingOccurrences(of: "Animation", with: ""), isOn: Binding(
+                                            Toggle(clip.displayName, isOn: Binding(
                                                 get: { state.selectedAnimations.contains(clip.name) },
                                                 set: { state.setAnimation(clip.name, enabled: $0) }
                                             )).toggleStyle(.checkbox)

@@ -131,7 +131,9 @@ public class AppState: ObservableObject {
         func overlaps(_ lhs: SourceAnimation, _ rhs: SourceAnimation) -> Bool {
             lhs.tracks.contains { a in rhs.tracks.contains { b in
                 guard let an = a["node"] as? Int, let bn = b["node"] as? Int, an == bn else { return false }
-                if a["type"] as? String == "transform" || b["type"] as? String == "transform" { return true }
+                if a["type"] as? String == "transform" || b["type"] as? String == "transform"
+                    || (a["target"] as? String ?? "").hasSuffix(":transform")
+                    || (b["target"] as? String ?? "").hasSuffix(":transform") { return true }
                 return (a["target"] as? String)?.split(separator: ":").last == (b["target"] as? String)?.split(separator: ":").last
             } }
         }

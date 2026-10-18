@@ -57,6 +57,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             exit(failures.isEmpty ? 0 : 1)
         }
 
+        if CommandLine.arguments.contains("--validate-struts") {
+            let failures = StrutValidation.run(device: device)
+            print("Strut validation failures: \(failures)")
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if CommandLine.arguments.contains("--validate-animation-performance") {
             let failures = AnimationValidation.run(device: device)
             print("Animation validation failures: \(failures)")
@@ -294,6 +300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     print(g.componentName, g.sourceMaterial, lo, hi)
                 }
             }
+            if CommandLine.arguments.contains("--dump-components-only") { exit(0) }
             let radius = rayTracer.currentScene?.radius ?? 3.0
             let center = rayTracer.currentScene?.center ?? SIMD3<Float>(0, 0.7, 0)
             appState.camera.viewportAspect = 1400.0 / 900.0

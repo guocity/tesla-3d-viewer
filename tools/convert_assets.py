@@ -639,9 +639,14 @@ def parse_animation(text):
             tm = re.search(r'"times": PoolRealArray\( ([^)]*)\)', keys)
             vm = re.search(r'"values": \[([^]]*)\]', keys, re.S)
             if not tm or not vm: continue
-            vectors = re.findall(r'Vector3\( ([^)]*)\)', vm.group(1))
-            if not vectors: continue
-            track.update(times=[float(x) for x in tm.group(1).split(",")], values=[[float(x) for x in v.split(",")] for v in vectors])
+            transforms = re.findall(r'Transform\(\s*([^)]*)\)', vm.group(1))
+            vectors = re.findall(r'Vector3\(\s*([^)]*)\)', vm.group(1))
+            values = transforms or vectors
+            if not values: continue
+            if transforms: track["valueType"] = "Transform"
+            track.update(times=[float(x) for x in tm.group(1).split(",")], values=[[float(x) for x in v.split(",")] for v in values])
+            if transforms and any(len(v) != 12 for v in track["values"]):
+                raise ValueError("Invalid Transform-valued animation track")
         else: continue
         if len(track.get("times", [])) == len(track.get("values", [])) and track.get("times"):
             tracks.append(track)
@@ -745,7 +750,7 @@ def parse_tscn_metadata(tscn_path: Path | None):
                         path = resolve_res_path(ref[1]) if ref else None
                         animation = parse_animation(path.read_text()) if path else None
                     if animation and animation["tracks"]:
-                        info["animations"].append(dict(animation, name=nm, source=str(tscn_path.relative_to(EXTRACTED_ROOT)), root=parent_str or "."))
+                        info["animations"].append(dict(animation, name=nm, source=str(tscn_path.relative_to(EXTRACTED_ROOT) if tscn_path.is_relative_to(EXTRACTED_ROOT) else tscn_path.relative_to(REA_GODOT_ROOT)), root=parent_str or "."))
 
             # Wheel & Brake mounts
             if any(nm.startswith(p) for p in ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RL", "Wheel_RR", "Wheel_L_Spatial", "Wheel_R_Spatial"]):
@@ -771,6 +776,18 @@ def parse_tscn_metadata(tscn_path: Path | None):
     # mesh, independently from the two side US brake/indicator fixtures.
     if tscn_path and "BayberryE41" in str(tscn_path):
         info["light_nodes"]["Brake_Light"] = "rear_running"
+    if tscn_path and tscn_path.name == "Model_X.tscn":
+        # Select the APK's active-spoiler variant rather than the mutually
+        # exclusive static mesh. Keep its source pivot and closed pose.
+        active = {"Spoiler_Active", "Brake_Light_Spoiler_Active"}
+        info["hidden_nodes"].difference_update(active)
+        info["hidden_nodes"].update({"Spoiler_Static", "Brake_Light_Spoiler_Static"})
+        info["force_visible_nodes"] = active
+        info["light_nodes"].pop("Brake_Light_Spoiler_Static", None)
+        info["light_nodes"]["Brake_Light_Spoiler_Active"] = "brake_center"
+        closed = [1,0,0,0,1,0,0,0,1,-0.78,-0.281,0]
+        info["node_transforms"]["Spoiler_Spatial"] = closed
+        info["node_transforms"][("Trunk_Spatial", "Spoiler_Spatial")] = closed
     return info
 
 
@@ -927,7 +944,11 @@ class GLBBuilder:
 
             source_material = read_source_material(mat_name)
             if source_material and source_material[0].get("params_blend_mode") == 1 and source_material[0].get("flags_unshaded") and not source_material[0].get("emission_enabled"):
-                continue
+                # Source lamp cards can use additive albedo instead of Godot's
+                # emission flag. They must survive the generic glow-card filter.
+                category = classify_pbr_material(mat_name,node_name)["extras"]["category"]
+                if category not in {"headlight","taillight","turn_signal"}:
+                    continue
             mat_idx = self.get_or_create_material(mat_name, node_name)
 
             # Position accessor
@@ -1015,6 +1036,7 @@ class GLBBuilder:
         ext_res = parsed["ext_res"]
         resources = parsed["resources"]
         hidden_set = tscn_info["hidden_nodes"] if tscn_info else set()
+        force_visible = tscn_info.get("force_visible_nodes", set()) if tscn_info else set()
         node_mat_map = tscn_info["node_materials"] if tscn_info else {}
         node_tr_map = tscn_info["node_transforms"] if tscn_info else {}
 
@@ -1072,7 +1094,7 @@ class GLBBuilder:
             if role is not None and parent not in skipped_godot_indices \
                     and not should_skip_node(nm, set()):
                 light_godot_roles[n] = role
-            elif parent in skipped_godot_indices or should_skip_node(nm, hidden_set) or nprops.get("visible") is False:
+            elif parent in skipped_godot_indices or should_skip_node(nm, hidden_set) or (nprops.get("visible") is False and nm not in force_visible):
                 skipped_godot_indices.add(n)
                 continue
 
@@ -1284,7 +1306,18 @@ def build_vehicle_glb(
                     n_def["extras"] = {"effect": "roofLightbar"}
                 builder.nodes.append(n_def)
                 builder.nodes[car_root].setdefault("children", []).append(att_holder)
-                builder.add_scn_to_tree(att_scn, parent_gltf_node=att_holder)
+                attached_root = builder.add_scn_to_tree(att_scn, parent_gltf_node=att_holder)
+                if att_name == "Tonneau_Cover":
+                    source_scene = EXTRACTED_ROOT / "Ego/Cybertruck/Tonneau.tscn"
+                    attachment = parse_tscn_metadata(source_scene)
+                    prefix = att_name + "/" + builder.nodes[attached_root]["name"] + "/"
+                    for clip in attachment["animations"]:
+                        # The flat TonneauCover plane is a view-dependent mobile
+                        # LOD proxy; the 28 detailed source slats are exported.
+                        tracks = [dict(t,target=prefix+t["target"]) for t in clip["tracks"]
+                                  if not t["target"].startswith("TonneauCover:")]
+                        tscn_info["animations"].append(dict(clip,tracks=tracks,playbackSpeed=3,
+                            root=att_name+"/"+builder.nodes[attached_root]["name"]))
 
     # Mount wheels onto Wheel_LF / RF / LR / RR mounts
     if wheel_scn and wheel_scn.exists():
@@ -1573,6 +1606,12 @@ def main():
         print(f"    -> {stats['vertices']:,} verts, {stats['triangles']:,} tris ({stats['size_bytes'] / (1024*1024):.2f} MB)")
 
     if only is not None:
+        catalog_path = OUT_DIR / "catalog.json"
+        if catalog_path.exists():
+            previous = json.loads(catalog_path.read_text())
+            replacements = {v["id"]: v for v in catalog["vehicles"]}
+            previous["vehicles"] = [replacements.get(v["id"],v) for v in previous["vehicles"]]
+            catalog_path.write_text(json.dumps(previous,indent=2))
         return
 
     # Standalone Wheels

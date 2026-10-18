@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Validate all exported vehicle surfaces and animation targets without a GPU."""
+import argparse
 import json
 import struct
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--only', help='Comma-separated vehicle IDs to revalidate')
+args = parser.parse_args()
+selected = set(args.only.split(',')) if args.only else None
 report = []
 for item in json.loads((root/'models/catalog.json').read_text())['vehicles']:
+    if selected is not None and item['id'] not in selected: continue
     p = root/'models'/f"{item['id']}.glb"
     data = p.read_bytes()
     assert data[:4] == b'glTF' and struct.unpack_from('<I',data,8)[0] == len(data)
@@ -58,5 +64,9 @@ for item in json.loads((root/'models/catalog.json').read_text())['vehicles']:
             material=gltf['materials'][prim['material']]
             components.append({'node':index,'path':paths[index],'surface':surface,'material':material['extras']['sourcePath'],'windowTrimTriangles':len(prim.get('extras',{}).get('windowTrimTriangles',[]))})
     report.append({'components':components,'vehicle':item['id'],'clips':len(clips),'tracks':sum(len(c['tracks']) for c in clips),'omitted':omitted,'materials':materials})
-(root/'models/source-audit.json').write_text(json.dumps(report,indent=2)+'\n')
+audit_path = root/'models/source-audit.json'
+if selected is not None and audit_path.exists():
+    replacements = {m['vehicle']: m for m in report}
+    report = [replacements.get(m['vehicle'],m) for m in json.loads(audit_path.read_text())]
+audit_path.write_text(json.dumps(report,indent=2)+'\n')
 print(f"Validated {len(report)} vehicles, {sum(x['clips'] for x in report)} clips, {sum(x['tracks'] for x in report)} tracks")
