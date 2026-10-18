@@ -284,7 +284,7 @@ public class GLBLoader {
                         }
                         if let e = floats(mat["emissiveFactor"]) { geom.emissive = e.max() ?? 0 }
                         let original = (ex["originalName"] as? String ?? "").lowercased()
-                        if category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light") {
+                        if (category == "glass_clear" || original == "lens" || original.hasPrefix("glass_light")) && !original.contains("lightbar") {
                             // Godot's dark blend color is not absorption in a clear optical lens.
                             geom.baseColor = SIMD3(repeating: 1)
                             geom.metallic = 0; geom.roughness = 0.008
@@ -312,6 +312,16 @@ public class GLBLoader {
                         for t in stride(from:0,to:geom.indices.count,by:3) { geom.indices.swapAt(t+1,t+2) }
                     }
                     if effect(i,name:"chargeFlow") { geom.isGround = 3 }
+                    let nodeName = nodes[i]["name"] as? String ?? ""
+                    let isBayberryLight = url.lastPathComponent.contains("bayberry") && effect(i, name: "light")
+                    let isCybertruckLightbar = url.lastPathComponent.contains("cybertruck") && (nodeName.contains("Lightbar") || nodeName == "Lights_Hood2")
+                    if isBayberryLight || isCybertruckLightbar {
+                        // Bayberry light strip and Cybertruck lightbar emit realistic bright white light
+                        geom.baseColor = SIMD3(0.96, 0.98, 1.0)
+                        geom.emissive = 2.5
+                        geom.metallic = 0.0
+                        geom.roughness = 0.1
+                    }
                     if let extras = prim["extras"] as? [String:Any],
                        let triangles = extras["windowTrimTriangles"] as? [Int], !triangles.isEmpty {
                         let mask = Set(triangles)

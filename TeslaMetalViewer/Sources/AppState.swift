@@ -10,9 +10,10 @@ public enum NavigationMode: String, CaseIterable, Identifiable {
 }
 
 public enum LightingPreset: String, CaseIterable, Identifiable {
-    case studio = "Studio", overcast = "Overcast", goldenHour = "Golden hour", blueHour = "Blue hour"
+    case studio = "Studio", overcast = "Overcast", goldenHour = "Golden hour", blueHour = "Blue hour", neonRain = "Neon rain", coastalStorm = "Coastal storm"
     public var id: String { rawValue }
     public var shaderIndex: Float { Float(Self.allCases.firstIndex(of: self) ?? 0) }
+    public var isWeatherScene: Bool { self == .neonRain || self == .coastalStorm }
 }
 public enum WindowTrim: String, CaseIterable, Identifiable {
     case source = "Original", chrome = "Chrome", delete = "Chrome delete"
@@ -54,6 +55,9 @@ public class AppState: ObservableObject {
     }
     
     @Published public var lighting: LightingPreset = .studio { didSet { onMaterialChanged?() } }
+    @Published public var rainIntensity: Float = 0.65 { didSet { onMaterialChanged?() } }
+    @Published public var wetness: Float = 0.85 { didSet { onMaterialChanged?() } }
+    @Published public var animateWeather = true { didSet { onMaterialChanged?() } }
     @Published public var exposure: Float = 1 { didSet { onMaterialChanged?() } }
     @Published public var windowTrim: WindowTrim = .source { didSet { onMaterialChanged?() } }
     @Published public var headlightReflection: Float = 0.15 { didSet { onMaterialChanged?() } }

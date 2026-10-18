@@ -138,17 +138,20 @@ public struct MetalViewport: NSViewRepresentable {
                 if state.animationTime >= state.animationDuration { state.isPlayingAnimation = false }
             }
             parent.rayTracer.effectTime += Float(dt)
+            if state.animateWeather { parent.rayTracer.weatherTime += Float(dt) }
             parent.rayTracer.drivingSpeed = state.isDriving ? state.drivingSpeed : 0
             if state.isDriving {
                 parent.rayTracer.wheelDegrees += min(state.drivingSpeed / 60,1) * 1000 * Float(dt)
             }
             parent.rayTracer.lighting = state.lighting
+            parent.rayTracer.rainIntensity = state.rainIntensity
+            parent.rayTracer.wetness = state.wetness
             parent.rayTracer.exposure = state.exposure
             parent.rayTracer.windowTrim = state.windowTrim
             parent.rayTracer.headlightReflection = state.headlightReflection
             parent.rayTracer.climateMode = state.climateMode
             parent.rayTracer.charging = state.isCharging
-            let effectsActive = state.isDriving || state.climateMode > 0 || state.isCharging
+            let effectsActive = state.isDriving || state.climateMode > 0 || state.isCharging || (state.lighting.isWeatherScene && state.animateWeather && state.rainIntensity > 0)
             if effectsActive { parent.rayTracer.resetAccumulation() }
             poseAccumulator += dt
             if (state.isDriving && poseAccumulator >= 1.0/24.0) || lastCharging != state.isCharging || lastClips != state.selectedAnimations || (lastPoseTime != state.animationTime && (poseAccumulator >= 1.0 / 24.0 || !state.isPlayingAnimation)) {

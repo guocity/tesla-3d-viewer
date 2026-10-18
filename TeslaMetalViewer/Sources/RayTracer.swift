@@ -25,6 +25,7 @@ public struct UniformsGPU {
     public var materialParams: SIMD4<Float> = .zero
     public var viewport: SIMD4<UInt32> = .zero
     public var tintParams: SIMD4<Float> = .zero
+    public var weather = SIMD4<Float>(0.65,0.85,0,0)
     public var renderOptions = SIMD4<Float>(0,1,0,0.15)
 }
 
@@ -74,15 +75,20 @@ public class RayTracer {
         }
     }
 
+    public var weatherTime: Float = 2
     public var effectTime: Float = 0
     public var drivingSpeed: Float = 0
     public var wheelDegrees: Float = 0
     public var climateMode: Float = 0
-    public var lighting: LightingPreset = .studio { didSet { if oldValue != lighting { resetAccumulation() } } }
+    public var lighting: LightingPreset = .studio { didSet { if oldValue != lighting {
+        if let scene = currentScene { buildAccelerationStructure(from: scene) }; resetAccumulation()
+    } } }
     public var exposure: Float = 1 { didSet { if oldValue != exposure { resetAccumulation() } } }
     public var windowTrim: WindowTrim = .source { didSet { if oldValue != windowTrim { resetAccumulation() } } }
     public var headlightReflection: Float = 0.15 { didSet { if oldValue != headlightReflection { resetAccumulation() } } }
 
+    public var rainIntensity: Float = 0.65 { didSet { if oldValue != rainIntensity { resetAccumulation() } } }
+    public var wetness: Float = 0.85 { didSet { if oldValue != wetness { resetAccumulation() } } }
     public var charging = false
     private var modelURL: URL?
 
@@ -122,7 +128,7 @@ public class RayTracer {
         var geomInfos: [GeometryInfoGPU] = []
         var geomDescriptors: [MTLAccelerationStructureTriangleGeometryDescriptor] = []
 
-        for geom in scene.geometries {
+        for geom in scene.geometries + SceneGeometry.make(for: lighting) {
             guard geom.vertices.count > 0, geom.indices.count > 0 else { continue }
 
             let vOffset = UInt32(allVertices.count)
@@ -305,6 +311,7 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
+        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
@@ -406,6 +413,7 @@ public class RayTracer {
         let tintTrans = 0.82 * (1.0 - privacyTintDarkness) + 0.08 * privacyTintDarkness
 
         var uniforms = UniformsGPU()
+        uniforms.weather = SIMD4(rainIntensity,wetness,weatherTime,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,charging ? 1 : 0)
         uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)

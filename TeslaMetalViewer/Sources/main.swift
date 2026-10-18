@@ -181,7 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if zip(visibility,expected).contains(where: { abs($0-$1)>0.001 }) { failures.append("Climate occlusion: \(visibility)") }
                 print("GPU climate visibility (opaque / glass / glass + body / open / behind airflow): \(visibility)")
             } else { failures.append("Climate GPU visibility probe failed") }
-            if MemoryLayout<UniformsGPU>.stride != 384 { failures.append("GPU uniforms layout") }
+            if MemoryLayout<UniformsGPU>.stride != 400 { failures.append("GPU uniforms layout") }
             print("Navigation, tour-preserving model cycling, trim isolation and GPU layout checks passed")
             print("Feature validation failures: \(failures)")
             exit(failures.isEmpty ? 0 : 1)
@@ -209,8 +209,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let value=argument("--paint"),let paint=TeslaCatalog.paints.first(where: { $0.id == value }) { appState.selectedPaint=paint }
             rayTracer.exposure = max(0.4,min(2.5,Float(argument("--exposure") ?? "1") ?? 1))
             rayTracer.headlightReflection = max(0,min(1,Float(argument("--lens-reflection") ?? "0.15") ?? 0.15))
+            rayTracer.rainIntensity = max(0,min(1,Float(argument("--rain") ?? "0.65") ?? 0.65))
+            rayTracer.wetness = max(0,min(1,Float(argument("--wetness") ?? "0.85") ?? 0.85))
             rayTracer.charging = CommandLine.arguments.contains("--charging")
             rayTracer.effectTime = Float(argument("--effect-time") ?? "2") ?? 2
+            rayTracer.weatherTime = rayTracer.effectTime
             rayTracer.drivingSpeed = Float(argument("--driving") ?? "0") ?? 0
             rayTracer.climateMode = Float(argument("--climate") ?? "0") ?? 0
             if let clip = argument("--animation") {
@@ -232,12 +235,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             appState.camera.viewportAspect = 1400.0 / 900.0
             let preset = appState.initialPreset ?? .hero
             appState.camera.applyPreset(preset, radius: radius, center: center)
+            if let picks = argument("--pick"), let scene = rayTracer.currentScene {
+                // CPU ray pick for identifying source surfaces under a render pixel.
+                let invView = appState.camera.viewMatrix().inverse
+                let invProj = appState.camera.projectionMatrix(aspect: 1400.0/900.0).inverse
+                for pair in picks.split(separator: ";") {
+                    let xy = pair.split(separator: ",").compactMap { Float($0) }
+                    guard xy.count == 2 else { continue }
+                    let ndc = SIMD2<Float>((xy[0]+0.5)/1400*2-1, -((xy[1]+0.5)/900*2-1))
+                    let t = invProj * SIMD4(ndc.x,ndc.y,1,1)
+                    let d4 = invView * SIMD4(t.x/t.w,t.y/t.w,t.z/t.w,0)
+                    let dir = simd_normalize(SIMD3(d4.x,d4.y,d4.z)), org = appState.camera.position
+                    var hits: [(Float,String)] = []
+                    for g in scene.geometries where g.isGround == 0 {
+                        for tri in stride(from: 0, to: g.indices.count, by: 3) {
+                            let p = [0,1,2].map { let v = g.vertices[Int(g.indices[tri+$0])].position; return SIMD3(v.x,v.y,v.z) }
+                            let e1 = p[1]-p[0], e2 = p[2]-p[0], pv = simd_cross(dir,e2), det = simd_dot(e1,pv)
+                            if abs(det) < 1e-9 { continue }
+                            let tv = org-p[0], u = simd_dot(tv,pv)/det
+                            if u < 0 || u > 1 { continue }
+                            let qv = simd_cross(tv,e1), v = simd_dot(dir,qv)/det
+                            if v < 0 || u+v > 1 { continue }
+                            let dist = simd_dot(e2,qv)/det
+                            if dist > 0.01 { hits.append((dist,"\(g.componentName) | \(g.sourceMaterial) | tr=\(g.transmission) flags=\(g.textures.w) col=\(g.baseColor) met=\(g.metallic) tri=\(tri/3)")) }
+                        }
+                    }
+                    print("PICK \(xy):")
+                    for h in hits.sorted(by: { $0.0 < $1.0 }).prefix(5) { print(String(format: "   %.3f ", h.0) + h.1) }
+                }
+                exit(0)
+            }
             
-            print("Rendering 32 ray-traced samples offscreen for \(model.name)...")
+            let renderSamples = max(1,min(1024,Int(argument("--samples") ?? "128") ?? 128))
+            print("Rendering \(renderSamples) ray-traced samples offscreen for \(model.name)...")
             if let cgImage = rayTracer.renderToImage(
                 width: 1400,
                 height: 900,
-                samples: 32,
+                samples: renderSamples,
                 camera: appState.camera,
                 paintColor: appState.selectedPaint.color,
                 metallic: appState.metallic,

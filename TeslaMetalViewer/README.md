@@ -21,7 +21,15 @@ Two-finger motion or left/middle drag orbits. Hold Shift to pan; right drag also
 
 Finish contains **Window surrounds: Original / Chrome / Chrome delete** and a **Headlight reflection** slider. Original preserves source materials. The other finishes affect only exported window-surround triangles, isolated using source exterior/trim bindings and proximity to side-pane boundaries and the outer silhouette. This is a geometric viewer customization, rather than an APK component label; internal pillars, glass, lamps and interior chrome retain their materials. `models/source-audit.json` records selected triangle counts per source surface.
 
-Studio contains **Studio / Overcast / Golden hour / Blue hour** lighting and exposure. Presets change sky reflections, key-light position and color, ambient fill, floor illumination, and shadows together. The surface shader uses GGX direct specular and Fresnel environment reflection. The environments are procedural viewer lighting, not APK backgrounds or a full path tracer.
+Scene & atmosphere contains **Studio / Overcast / Golden hour / Blue hour / Neon rain / Coastal storm**. Presets change the sky, key light, ambient fill, floor and shadows together.
+
+- **Neon rain** adds an original 3D street set: buildings, illuminated windows, cyan/red neon storefronts, raised pavement and bollards. These meshes share the vehicle acceleration structure and appear in ray-traced reflections and shadows.
+- **Coastal storm** adds a misty coastal horizon, cloud variation and 3D roadside guardrails.
+- Both weather scenes have independent **Rain** and **Surface wetness** controls. World-space road grain, worn lane markings, irregular puddles, animated ripple normals and distance haze replace the studio floor. Rain streak intersections stop at the first visible surface. Paint gains subtle bead-normal detail and a water coat. Set rain to zero for an after-rain look; set both sliders to zero for a dry road.
+- **Animate weather** can be paused for progressive accumulation and clean screenshots, independently of source vehicle, driving and climate animations. Weather controls have no effect on the four original studio/daylight scenes.
+- Paint uses an energy-conserving GGX base and a separate dielectric clearcoat lobe. Direct area-light highlights are stabilized while shadow rays still sample the light area. Secondary road/body/glass reflections now shade the actual intersected material with texture color and lighting instead of using a flat base color.
+
+These are original procedural viewer scenes inspired by cinematic automotive photography, not APK backgrounds or a full path tracer. They move the viewer toward a racing-game presentation; they do not supply a full AAA game world, licensed game assets, volumetric clouds, or a multi-bounce light transport engine.
 
 ## Rebuild and verify
 
@@ -44,6 +52,16 @@ Offscreen exports use the same Metal shaders as the app:
 ```
 
 Use `--lighting golden-hour --trim chrome --paint pearl_white --exposure 1.2` for a lighting export; `--trim chrome-delete` selects black surrounds. `--lens-reflection 0` removes the outer light-cover reflection for inspection.
+
+Weather exports use the same controls as the app, with a frozen weather clock for repeatable accumulation:
+
+```sh
+.build/release/TeslaMetalViewer --model model3_high --lighting neon-rain --paint ultra_red --rain 0.65 --wetness 0.85 --effect-time 2 --samples 256 --render-out /tmp/neon-rain.png
+.build/release/TeslaMetalViewer --model model3_high --lighting coastal-storm --paint quicksilver --render-out /tmp/coastal-storm.png
+python3 ../tools/render_weather_smoke.py
+```
+
+Exports default to 128 samples; `--samples 1...1024` trades render time for cleaner reflections. `render_weather_smoke.py` renders on the real Metal device and checks nonblank output, weather isolation in the studio, dry-scene stability, animated weather differences and distinct scene presets. It requires Pillow.
 
 Pass comma-separated clip names to `--animation` to render simultaneous clips, for example `--animation HoodAnimation,RFDoorAnimation`. In the app, check multiple clips, then Play or scrub their shared timeline. Play restarts from zero after reaching the end.
 

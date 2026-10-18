@@ -117,10 +117,16 @@ public struct ContentView: View {
                                 }
                             }.padding(8)
                         }
-                        GroupBox("Studio") {
+                        GroupBox("Scene & atmosphere") {
                             VStack(alignment: .leading, spacing: 12) {
-                                Picker("Lighting", selection: $state.lighting) {
+                                Picker("Scene", selection: $state.lighting) {
                                     ForEach(LightingPreset.allCases) { Text($0.rawValue).tag($0) }
+                                }
+                                if state.lighting.isWeatherScene {
+                                    control("Rain", value: $state.rainIntensity, range: 0...1)
+                                    control("Surface wetness", value: $state.wetness, range: 0...1)
+                                    Toggle("Animate weather", isOn: $state.animateWeather)
+                                    Text("Pause weather to converge a clean still. Wetness adds puddles, ripples and a water coat.").font(.caption).foregroundStyle(.secondary)
                                 }
                                 control("Exposure", value: $state.exposure, range: 0.4...2.5)
                                 control("Floor reflection", value: $state.groundReflectivity, range: 0...1)

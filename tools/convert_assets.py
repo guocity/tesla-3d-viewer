@@ -15,6 +15,7 @@ from functools import lru_cache
 import math
 import re
 import struct
+import sys
 from pathlib import Path
 import numpy as np
 
@@ -565,6 +566,13 @@ def read_source_material(source_path):
     return props, resource["type"]
 
 
+LIGHT_PATH_ROLES = {
+    "drl_path": "drl",
+    "headlights_path": "headlights",
+    "park_light_rear_path": "parking",
+}
+
+
 def should_skip_node(node_name: str, hidden_set: set[str]) -> bool:
     """Return True if a node is a duplicate RHD/Global part, collision volume, or baked ground projection plane."""
     if node_name in hidden_set:
@@ -627,6 +635,7 @@ def parse_tscn_metadata(tscn_path: Path | None):
         "wheel_mounts": [],
         "brake_mounts": [],
         "animations": [],
+        "light_nodes": {},
     }
     if not tscn_path or not tscn_path.exists():
         return info
@@ -699,6 +708,14 @@ def parse_tscn_metadata(tscn_path: Path | None):
                 if nm in info["node_transforms"] or (parent_str, nm) in info["node_transforms"]:
                     t_vals = info["node_transforms"].get((parent_str, nm), info["node_transforms"].get(nm))
                     info["brake_mounts"].append((parent_str, nm, t_vals))
+
+    # The vehicle script toggles these hidden-by-default lamp meshes at runtime
+    # (VehicleManager set_headlights_on, DRL, parking lights). For Bayberry (Model Y Juniper refresh),
+    # keep them so the distinctive full front light strip and rear bar are modeled.
+    if tscn_path and "bayberry" in tscn_path.name.lower():
+        for key, role in LIGHT_PATH_ROLES.items():
+            for m in re.finditer(rf'^{key} = NodePath\("([^"]+)"\)', txt, re.MULTILINE):
+                info["light_nodes"][m.group(1).split("/")[-1]] = role
 
     return info
 
@@ -956,6 +973,7 @@ class GLBBuilder:
         idx = 0
         godot_to_gltf = {}
         skipped_godot_indices = set()
+        light_godot_roles = {}
         first_node_idx = None
 
         for n in range(ncnt):
@@ -973,11 +991,21 @@ class GLBBuilder:
             idx += 1 + gcnt
 
             nm = names[name_id]
-            if parent in skipped_godot_indices or should_skip_node(nm, hidden_set) or nprops.get("visible") is False:
+            light_nodes = tscn_info.get("light_nodes", {}) if tscn_info else {}
+            hidden = nm in hidden_set or nprops.get("visible") is False
+            role = light_nodes.get(nm) if hidden else None
+            if role is None and parent in light_godot_roles:
+                role = light_godot_roles[parent]
+            if role is not None and parent not in skipped_godot_indices \
+                    and not should_skip_node(nm, set()):
+                light_godot_roles[n] = role
+            elif parent in skipped_godot_indices or should_skip_node(nm, hidden_set) or nprops.get("visible") is False:
                 skipped_godot_indices.add(n)
                 continue
 
             n_def = {"name": nm}
+            if n in light_godot_roles:
+                n_def["extras"] = {"effect": "light", "lightRole": light_godot_roles[n]}
 
             # Check transform (either overridden in .tscn or in .scn)
             t_vals = node_tr_map.get(nm, nprops.get("transform"))
@@ -1426,7 +1454,12 @@ def main():
     ]
 
     source_names = {'cybertruck': 'Cybertruck', 'model3_high': 'Model 3 · 3_High', 'modely_high': 'Model Y · Y_High', 'models_plaid': 'Model S · Palladium', 'modelx_plaid': 'Model X · Palladium', 'semi': 'Tesla Semi', 'bayberry': 'Model Y · Bayberry', 'bayberry_e41': 'Bayberry E41', 'bayberry_e80': 'Bayberry E80', 'poppyseed': 'Model 3 · Poppyseed', 'models_legacy': 'Model S · legacy', 'modelx_legacy': 'Model X · legacy'}
+    only = None
+    if "--only" in sys.argv:
+        only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     for v in vehicle_specs:
+        if only is not None and v["id"] not in only:
+            continue
         v["name"] = source_names[v["id"]]
         v["subtitle"] = "APK source: " + str(v.get("tscn",v.get("legacy_tscn")).relative_to(EXTRACTED_ROOT))
         v["specs"] = None
@@ -1456,6 +1489,9 @@ def main():
             **stats,
         })
         print(f"    -> {stats['vertices']:,} verts, {stats['triangles']:,} tris ({stats['size_bytes'] / (1024*1024):.2f} MB)")
+
+    if only is not None:
+        return
 
     # Standalone Wheels
     wheel_specs = [
