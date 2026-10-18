@@ -30,9 +30,15 @@ for model in ['bayberry', 'bayberry_e80']:
         wash = redness(on) - redness(off)
         band = slice(374, 393) if model == 'bayberry' else slice(391, 410)
         probes = [wash[band, x:x+40].mean() for x in [330, 600, 1030]]
+        # Check the bottom separately: a bright center stripe must not satisfy
+        # coverage of the lower curved face, including its left and right ends.
+        lower_band = slice(397, 401) if model == 'bayberry' else slice(412, 416)
+        lower = [wash[lower_band, x:x+30].mean() for x in [330, 600, 1040]]
+        # Dimmed calibration: require visible coverage, not the old intensity.
+        assert min(lower) > 50, f'{model}/{paint}: lower panel remains dark {lower}'
         assert min(probes) > 70, f'{model}/{paint}: dark panel section {probes}'
         assert min(probes[0], probes[2]) > probes[1]*0.65, f'{model}/{paint}: dark curved ends {probes}'
         assert redness(off)[band, 330:1070].mean() < 15, f'{model}/{paint}: panel lit with lamps off'
         assert wash[450:550, 400:1000].mean() < 15, f'{model}/{paint}: red wash spills onto lower tailgate'
-        print(model, paint, 'left/center/right red wash:', [round(v, 1) for v in probes], flush=True)
+        print(model, paint, 'upper/lower red wash:', [[round(float(v), 1) for v in band] for band in [probes, lower]], flush=True)
 print('PASS: curved rear panel, both ends, lamps off and lower-tailgate spill')

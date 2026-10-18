@@ -213,7 +213,7 @@ public struct ShaderSource {
     }
     // Recessed rear-panel wash from the downward-facing parking strip.
     // Finite width and a tight rear-housing depth keep light off bumper/cabin.
-    static float3 rearPanelLight(float3 p, float3 n, float3 v, float3 base, float metal, float rough, constant Uniforms &u) {
+    static float3 rearPanelLight(float3 p, float3 n, float3 v, float3 base, float metal, float rough, uint flags, constant Uniforms &u) {
         if (u.rearStrip.w<=0.0) return float3(0);
         float3 source=u.rearStrip.xyz;
         source.z=clamp(p.z,source.z-u.rearStripSize.x,source.z+u.rearStripSize.x);
@@ -222,15 +222,35 @@ public struct ShaderSource {
         source.x=mix(u.rearStripDepths[a/4u][a%4u],u.rearStripDepths[b/4u][b%4u],along-float(a));
         float drop=source.y-p.y;
         float depth=p.x-source.x;
-        float mask=smoothstep(0.0,0.012,drop)*(1.0-smoothstep(0.035,0.065,drop))
+        float mask=smoothstep(0.0,0.012,drop)*(1.0-smoothstep(0.075,0.10,drop))
                   *(1.0-smoothstep(0.08,0.18,abs(depth)))
                   *(1.0-smoothstep(u.rearStripSize.x,u.rearStripSize.x+0.04,abs(p.z-u.rearStrip.z)));
-        float3 delta=source-p;
-        float distance=max(length(delta),0.015);
-        float3 direction=delta/distance;
-        float down=max(direction.y,0.0);
-        return directBRDF(n,v,direction,base,metal,max(rough,0.45))*float3(1.0,0.004,0.001)
-               *u.rearStrip.w*down*mask*1.8/(0.012+distance*distance);
+        if (mask<=0.0) return float3(0);
+        // Integrate a finite downward-facing aperture. A single nearest point
+        // produces a narrow specular stripe and misses the lower curved face.
+        float3 wash=float3(0);
+        // The source cover is authored with zero RGB. Its indirect red wash
+        // needs a small diffuse scattering response instead of a GGX highlight.
+        float3 receiver=max(base*(1.0-metal),float3(0.04));
+        for (uint i=0u;i<6u;i++) {
+            float3 aperture=source;
+            aperture.x-=0.008+0.045*(float(i)+0.5)/6.0;
+            float3 delta=aperture-p;
+            float distance=max(length(delta),0.015);
+            float3 direction=delta/distance;
+            float down=max(direction.y,0.0);
+            float3 response=receiver*(max(dot(n,direction),0.0)/3.14159265);
+            // The letters share the black receiver material, but their glossier
+            // coat also reflects the red aperture. Preserve its light color.
+            if ((flags & 8388608)!=0) {
+                // Integrate the broad red field reflected by the smooth coat,
+                // in addition to the same diffuse response as the panel.
+                float3 coatF=fresnelSchlick(max(dot(n,v),0.0),float3(0.04));
+                response+=coatF*max(dot(n,direction),0.0)*(1.0-clamp(rough,0.0,1.0));
+            }
+            wash+=response*down/(0.012+distance*distance);
+        }
+        return wash*float3(1.0,0.004,0.001)*u.rearStrip.w*mask*0.3/6.0;
     }
     static float3 emittedLight(GeometryInfo mat, float4 uv, array<texture2d<float>,32> textures, constant Uniforms &u) {
         uint signals=uint(u.effectParams.w);
@@ -259,7 +279,7 @@ public struct ShaderSource {
         float3 F=fresnelSchlick(dot(n,v),mix(float3(0.04),base,metal));
         if ((mat.textures.w & 1048576)!=0) F *= 0.18;
         return directBRDF(n,v,normalize(l.keyPosition-p),base,metal,max(rough,sqrt(l.softSize/max(length(l.keyPosition-p),1.0))*0.36))*l.keyColor
-             +rearPanelLight(p,n,v,base,metal,rough,u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
+             +rearPanelLight(p,n,v,base,metal,rough,uint(mat.textures.w),u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
     }
 
     // Visibility to the source airflow plane. Transparent interfaces transmit;
@@ -787,7 +807,7 @@ public struct ShaderSource {
                         transColor=directBRDF(tn,viewDir,normalize(cabinKey-tHitPos),tBase,tMetallic,max(tMat.params.x,areaRoughness))*lighting.keyColor*visibility
                             +tBase*(1.0-tMetallic)*min(gi,float3(2.5))*ao;
                     }
-                    transColor += rearPanelLight(tHitPos,tn,viewDir,tBase,tMetallic,tMat.params.x,uniforms);
+                    transColor += rearPanelLight(tHitPos,tn,viewDir,tBase,tMetallic,tMat.params.x,uint(tMat.textures.w),uniforms);
                 }
 
                 if (transHit.type==intersection_type::triangle && geometries[transHit.geometry_id].params.w>0.01) transColor=float3(0);
@@ -888,7 +908,7 @@ public struct ShaderSource {
                 }
                 if (isRubber) { direct *= 0.8; specBase *= 0.05; }
                 if (isLeather) { specBase *= 0.18; }
-                direct += rearPanelLight(hitPos, normal, viewDir, baseCol, metallic, roughness, uniforms);
+                direct += rearPanelLight(hitPos,normal,viewDir,baseCol,metallic,roughness,uint(mat.textures.w),uniforms);
 
                 float3 layered = direct + diffuseGI + specBase;
                 if (clearcoat > 0.02) {

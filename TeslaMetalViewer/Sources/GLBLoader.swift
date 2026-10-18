@@ -523,6 +523,30 @@ public class GLBLoader {
                         seats.componentName += "/Seat upholstery"
                         if !seats.indices.isEmpty { scene.geometries.append(seats) }
                     }
+                    if ["bayberry.glb","bayberry_e80.glb"].contains(url.lastPathComponent)
+                        && nodes[i]["name"] as? String == "Trunk_Cover" && geom.sourceMaterial.hasSuffix("/Trim.tres") {
+                        let letters = RearLettering.vertices(positions: positions,indices: geom.indices)
+                        var badge = geom; badge.indices = []
+                        let original = geom.indices; geom.indices = []
+                        for t in stride(from: 0,to: original.count,by: 3) {
+                            let face = Array(original[t..<t+3])
+                            if letters.contains(face[0]) { badge.indices += face } else { geom.indices += face }
+                        }
+                        // Use the receiver's source material, including its black
+                        // albedo and metallicity. Only the surface gloss differs.
+                        if let panel = scene.geometries.first(where: {
+                            $0.componentName == geom.componentName && $0.sourceMaterial.hasSuffix("/Cover.tres")
+                        }) {
+                            badge.baseColor = panel.baseColor
+                            badge.metallic = panel.metallic
+                            badge.sourceMaterial = panel.sourceMaterial
+                            badge.textures = panel.textures
+                        }
+                        badge.componentName += "/TESLA glossy panel material"
+                        badge.roughness = 0.25; badge.clearcoat = 0.55
+                        badge.textures.w |= 8388608
+                        if !badge.indices.isEmpty { scene.geometries.append(badge) }
+                    }
                     if !geom.indices.isEmpty { scene.geometries.append(geom) }
                 }
             }

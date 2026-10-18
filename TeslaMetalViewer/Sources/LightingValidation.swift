@@ -12,6 +12,22 @@ enum LightingValidation {
                   let off = GLBLoader.loadModel(from: url,device: device,headlightsOn: false,drlOn: false) else {
                 failures.append(model.id + ": load failed"); continue
             }
+            if ["bayberry","bayberry_e80"].contains(model.id) {
+                let letters = off.geometries.first { $0.componentName.hasSuffix("/TESLA glossy panel material") }
+                let panel = off.geometries.first {
+                    $0.componentName.hasSuffix("/Trunk_Cover") && $0.sourceMaterial.hasSuffix("/Cover.tres")
+                }
+                if let letters, let panel {
+                    if letters.baseColor != panel.baseColor || letters.metallic != panel.metallic
+                        || letters.sourceMaterial != panel.sourceMaterial
+                        || letters.textures.x != panel.textures.x || letters.textures.y != panel.textures.y
+                        || letters.textures.z != panel.textures.z || letters.roughness >= panel.roughness
+                        || letters.clearcoat <= panel.clearcoat || letters.emissive != 0
+                        || letters.indices.count != 4188 {
+                        failures.append(model.id + ": TESLA letters must share the panel material with more gloss")
+                    }
+                } else { failures.append(model.id + ": missing separate TESLA lettering or rear receiver") }
+            }
             if off.geometries.contains(where: {
                 ($0.textures.w & 65536) != 0 || $0.sourceMaterial.lowercased().contains("led_strip")
                     || $0.sourceMaterial.lowercased().hasSuffix("/cybertruck/led.material")
