@@ -56,7 +56,7 @@ public struct ShaderSource {
         float softSize;
     };
     static Lighting lightingForPreset(float preset) {
-        if (preset < 0.5) return {float3(5.5,9.5,6.5),float3(2.0,1.94,1.85),float3(0.22,0.25,0.30),float3(0.10,0.115,0.14),3.0};
+        if (preset < 0.5) return {float3(5.5,9.5,6.5),float3(2.0,1.94,1.85),float3(0.16,0.18,0.21),float3(0.05,0.055,0.062),3.0};
         if (preset < 1.5) return {float3(-8,35,15),float3(1.25,1.35,1.5),float3(0.42,0.48,0.58),float3(0.16,0.175,0.19),22.0};
         if (preset < 2.5) return {float3(-45,12,32),float3(3.6,1.95,0.82),float3(0.22,0.30,0.46),float3(0.17,0.13,0.095),1.2};
         if (preset > 4.5) return {float3(-18,25,12),float3(1.6,1.85,2.2),float3(0.24,0.30,0.38),float3(0.065,0.075,0.085),14.0};
@@ -133,13 +133,48 @@ public struct ShaderSource {
             if (preset > 1.5) sky += l.keyColor*(pow(sun,600.0)*3.0+pow(sun,12.0)*0.12);
             return sky;
         }
-        float3 bg = y >= 0 ? mix(float3(0.16,0.18,0.22),float3(0.06,0.07,0.10),pow(y,0.6))
-                              : mix(float3(0.16,0.18,0.22),float3(0.025),smoothstep(0.0,0.6,-y));
-        // Feather softbox edges to avoid hard white cutouts in curved glass.
-        float box = smoothstep(0.42,0.65,dir.y)*(1.0-smoothstep(0.48,0.72,abs(dir.x)))*(1.0-smoothstep(0.72,0.95,abs(dir.z)));
-        bg += float3(2.0,2.0,2.05)*box;
-        bg += float3(0.22,0.34,0.55)*pow(max(dot(dir,normalize(float3(-0.8,0.35,0.4))),0.0),7.0);
+        // Automotive photo studio: dark cyclorama, a large overhead softbox and
+        // long strip lights that draw crisp highlight lines along the body.
+        float3 bg = y >= 0 ? mix(float3(0.075,0.080,0.090),float3(0.018,0.020,0.024),pow(y,0.55))
+                              : mix(float3(0.075,0.080,0.090),float3(0.012),smoothstep(0.0,0.35,-y));
+        if (dir.y > 0.05) {
+            float2 q = dir.xz/dir.y;
+            float box = (1.0-smoothstep(0.62,0.70,abs(q.x)))*(1.0-smoothstep(0.30,0.36,abs(q.y)));
+            float diffuser = 0.88+0.12*(1.0-smoothstep(0.0,0.7,length(q*float2(1.0,1.8))));
+            bg += float3(5.2,5.2,5.4)*box*diffuser;
+            // Soft spill halo around the softbox frame.
+            bg += float3(0.10,0.11,0.13)*(1.0-smoothstep(0.6,1.6,length(q*float2(0.9,1.6))));
+        }
+        for (int s = -1; s <= 1; s += 2) {
+            float side = float(s);
+            if (dir.z*side > 0.08) {
+                float2 q = dir.xy/abs(dir.z);
+                // Two horizontal strips per side at different heights.
+                float upper = 1.0-smoothstep(0.012,0.022,abs(q.y-0.62));
+                float lower = 1.0-smoothstep(0.008,0.016,abs(q.y-0.26));
+                float len = 1.0-smoothstep(1.6,1.75,abs(q.x));
+                bg += float3(7.5,7.6,8.0)*upper*len + float3(3.0,3.05,3.2)*lower*len;
+            }
+            if (dir.x*side > 0.08) {
+                // Vertical rim strips at the front and rear corners.
+                float2 q = dir.zy/abs(dir.x);
+                float rim = (1.0-smoothstep(0.015,0.03,abs(abs(q.x)-0.85)))*smoothstep(-0.05,0.02,q.y)*(1.0-smoothstep(0.9,1.0,q.y));
+                bg += float3(3.2,3.3,3.6)*rim;
+            }
+        }
+        // Cool bounce card on camera-left.
+        bg += float3(0.10,0.16,0.26)*pow(max(dot(dir,normalize(float3(-0.8,0.35,0.4))),0.0),6.0);
         return bg;
+    }
+
+    // What the camera sees directly. In the studio the light fixtures sit
+    // off-camera: they appear in reflections, not as objects in the backdrop.
+    static float3 sampleBackdrop(float3 dir, float preset) {
+        if (preset >= 0.5) return sampleEnvironment(dir, preset);
+        float y = clamp(dir.y, -1.0, 1.0);
+        float3 bg = y >= 0 ? mix(float3(0.075,0.080,0.090),float3(0.018,0.020,0.024),pow(y,0.55))
+                           : mix(float3(0.075,0.080,0.090),float3(0.012),smoothstep(0.0,0.35,-y));
+        return bg + float3(0.05,0.055,0.065)*pow(max(y,0.0),3.0);
     }
 
     static void applyTrim(thread GeometryInfo &mat, constant Uniforms &uniforms) {
@@ -275,6 +310,79 @@ public struct ShaderSource {
         return h;
     }
 
+    // ------------------------------------------------------------------
+    // Physically based sampling helpers
+    // ------------------------------------------------------------------
+    static float hash31(float3 p) { return fract(sin(dot(p,float3(127.1,311.7,74.7)))*43758.5453); }
+    static float3 tangentToWorld(float3 local, float3 n) {
+        float3 up = abs(n.y) < 0.999 ? float3(0,1,0) : float3(1,0,0);
+        float3 t = normalize(cross(up,n));
+        float3 b = cross(n,t);
+        return normalize(t*local.x + b*local.y + n*local.z);
+    }
+    static float3 sampleCosine(float3 n, thread uint &seed) {
+        float u1 = rand(seed), u2 = rand(seed);
+        float r = sqrt(u1), phi = 6.2831853*u2;
+        return tangentToWorld(float3(r*cos(phi), r*sin(phi), sqrt(max(0.0,1.0-u1))), n);
+    }
+    // GGX microfacet importance sampling: reflect the view about a sampled half vector.
+    static float3 sampleGGXReflection(float3 n, float3 v, float rough, thread uint &seed) {
+        float a = max(rough*rough, 0.0004);
+        float u1 = rand(seed), u2 = rand(seed);
+        float cosT = sqrt((1.0-u1)/(1.0+(a*a-1.0)*u1));
+        float sinT = sqrt(max(0.0,1.0-cosT*cosT)), phi = 6.2831853*u2;
+        float3 h = tangentToWorld(float3(sinT*cos(phi), sinT*sin(phi), cosT), n);
+        float3 r = reflect(-v,h);
+        return dot(r,n) > 0.0 ? r : reflect(-v,n);
+    }
+    static float3 hitNormal(typename intersector<triangle_data>::result_type h, GeometryInfo m,
+                            device const Vertex *vertices, device const uint *indices, float3 dir, thread float4 &uvOut) {
+        uint i = m.indexOffset + h.primitive_id*3;
+        Vertex a = vertices[indices[i]], b = vertices[indices[i+1]], c = vertices[indices[i+2]];
+        float2 bc = h.triangle_barycentric_coord; float w = 1.0-bc.x-bc.y;
+        float3 n = normalize(a.normal.xyz*w + b.normal.xyz*bc.x + c.normal.xyz*bc.y);
+        uvOut = a.uv*w + b.uv*bc.x + c.uv*bc.y;
+        return dot(n,dir) > 0.0 ? -n : n;
+    }
+    // Radiance arriving along a glossy/specular secondary ray.
+    static float3 traceRadiance(float3 origin, float3 dir, float maxDist,
+                                primitive_acceleration_structure accel, device const Vertex *vertices,
+                                device const uint *indices, constant GeometryInfo *geometries,
+                                constant Uniforms &u, array<texture2d<float>,32> textures) {
+        ray r; r.origin = origin; r.direction = dir; r.min_distance = 0.01; r.max_distance = maxDist;
+        auto h = intersectVisible(r,accel,vertices,indices,geometries,u);
+        if (h.type != intersection_type::triangle) return sampleEnvironment(dir,u.renderOptions.x);
+        GeometryInfo m = geometries[h.geometry_id];
+        applyTrim(m,u);
+        Lighting l = lightingForPreset(u.renderOptions.x);
+        if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.25);
+        float4 uv; float3 n = hitNormal(h,m,vertices,indices,dir,uv);
+        return surfaceRadiance(m,n,-dir,origin+dir*h.distance,uv,u,textures);
+    }
+    // Conservative one-bounce diffuse estimate: unshadowed key light is omitted
+    // so wheel wells, panel gaps and the underbody stay properly occluded.
+    static float3 traceIrradiance(float3 origin, float3 dir, primitive_acceleration_structure accel,
+                                  device const Vertex *vertices, device const uint *indices,
+                                  constant GeometryInfo *geometries, constant Uniforms &u,
+                                  array<texture2d<float>,32> textures) {
+        ray r; r.origin = origin; r.direction = dir; r.min_distance = 0.004; r.max_distance = 6.0;
+        auto h = intersectVisible(r,accel,vertices,indices,geometries,u);
+        if (h.type != intersection_type::triangle) return sampleEnvironment(dir,u.renderOptions.x);
+        GeometryInfo m = geometries[h.geometry_id];
+        applyTrim(m,u);
+        Lighting l = lightingForPreset(u.renderOptions.x);
+        if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.12);
+        if (m.params.w > 0.3) return sampleEnvironment(dir,u.renderOptions.x)*m.params.w*0.7;
+        float3 base = m.isPaint == 1 ? u.carPaintColor.xyz : m.baseColor.xyz;
+        float3 bounce = base*l.ambientColor*0.35;
+        if (m.isGround == 4) bounce += base*m.params.z;
+        else if (m.params.z > 0.0) {
+            float4 uv; hitNormal(h,m,vertices,indices,dir,uv);
+            bounce += emittedLight(m,uv,textures,u);
+        }
+        return bounce;
+    }
+
     kernel void raytraceKernel(
         primitive_acceleration_structure accel [[buffer(0)]],
         device const Vertex *vertices [[buffer(1)]],
@@ -316,7 +424,7 @@ public struct ShaderSource {
         typename intersector<triangle_data>::result_type hit = intersectVisible(primaryRay,accel,vertices,indices,geometries,uniforms);
 
         constexpr sampler materialSampler(coord::normalized, address::repeat, filter::linear);
-        float3 color = sampleEnvironment(rayDir,uniforms.renderOptions.x);
+        float3 color = sampleBackdrop(rayDir,uniforms.renderOptions.x);
 
         if (hit.type == intersection_type::triangle) {
             uint geomId = hit.geometry_id;
@@ -379,15 +487,16 @@ public struct ShaderSource {
             float areaRoughness=sqrt(lighting.softSize/max(length(lighting.keyPosition-hitPos),1.0))*0.36;
             float NdotL = max(dot(normal, lightDir), 0.0);
 
-            // Ray-traced shadow ray
+            // Ray-traced soft shadow toward a jittered point on the area light.
             ray shadowRay;
             shadowRay.origin = hitPos + normal * 0.003;
-            shadowRay.direction = lightDir;
+            shadowRay.direction = normalize(keyLightPos - hitPos);
             shadowRay.min_distance = 0.01;
             shadowRay.max_distance = length(keyLightPos - hitPos);
 
             typename intersector<triangle_data>::result_type shadowHit = intersectVisible(shadowRay,accel,vertices,indices,geometries,uniforms);
-            float shadow = (shadowHit.type == intersection_type::none) ? 1.0 : 0.22;
+            // Fill inside shadows now comes from ray-traced sky/bounce lighting.
+            float shadow = (shadowHit.type == intersection_type::none) ? 1.0 : 0.0;
 
             if (mat.isGround == 1) {
                 // ============================================================
@@ -434,11 +543,9 @@ public struct ShaderSource {
                 float3 roadNormal=wetNormal(hitPos.xz,uniforms.weather.z,wet*uniforms.weather.x);
 
                 // Secondary ray: Ground reflection pointing upwards into the car
-                float3 reflDir = reflect(rayDir, roadNormal);
-                if (groundRoughness > 0.002) {
-                    float3 randOff = float3(rand(seed) - 0.5, rand(seed) * 0.15, rand(seed) - 0.5) * groundRoughness;
-                    reflDir = normalize(reflDir + randOff);
-                }
+                float3 reflDir = groundRoughness > 0.002
+                    ? sampleGGXReflection(roadNormal,-rayDir,groundRoughness*0.8,seed)
+                    : reflect(rayDir, roadNormal);
 
                 ray reflRay;
                 reflRay.origin = hitPos + float3(0.0, 0.004, 0.0);
@@ -486,7 +593,7 @@ public struct ShaderSource {
                 }
 
                 float3 groundFinal = mix(groundBase, reflectedColor, groundReflectivity * fresnel);
-                color = mix(sampleEnvironment(rayDir,uniforms.renderOptions.x), groundFinal, vignette);
+                color = mix(sampleBackdrop(rayDir,uniforms.renderOptions.x), groundFinal, vignette);
             } else if (mat.params.w > 0.01) {
                 // ============================================================
                 // RAY-TRACED AUTOMOTIVE GLASS & HEADLIGHT TRANSPARENCY
@@ -634,59 +741,68 @@ public struct ShaderSource {
 
 
                 float3 viewDir = -rayDir;
-                float3 halfDir = normalize(lightDir + viewDir);
-                float NdotH = max(dot(normal, halfDir), 0.0);
-                float specPower = mix(128.0, 8.0, roughness);
-                float spec = pow(NdotH, specPower) * (1.0 - roughness * 0.5);
-
-                // Secondary ray: Metallic reflection
-                float3 reflDir = reflect(rayDir, normal);
+                bool isPaint = mat.isPaint == 1;
                 bool isStainlessSteel = ((mat.textures.w & 2048) != 0);
-                if (isStainlessSteel) {
-                    // Cold-rolled brushed 30X stainless steel anisotropic/micro-grain perturbation
-                    float grain = (noise2(hitPos.xz * 450.0 + hitPos.y * 120.0) - 0.5) * 0.045;
-                    float3 randOff = float3(rand(seed) - 0.5, rand(seed) - 0.5, rand(seed) - 0.5) * (roughness + grain) * 0.40;
-                    reflDir = normalize(reflDir + randOff);
-                } else if (roughness > 0.02) {
-                    float3 randOff = float3(rand(seed) - 0.5, rand(seed) - 0.5, rand(seed) - 0.5) * roughness * 0.35;
-                    reflDir = normalize(reflDir + randOff);
-                }
+                bool isRubber = (mat.textures.w & 128) != 0;
+                float3 tangent = normalize(cross(abs(normal.y) < 0.95 ? float3(0,1,0) : float3(1,0,0), normal));
+                float3 bitangent = cross(normal, tangent);
 
-                ray carReflRay;
-                carReflRay.origin = hitPos + normal * 0.003;
-                carReflRay.direction = reflDir;
-                carReflRay.min_distance = 0.01;
-                carReflRay.max_distance = 45.0;
-
-                typename intersector<triangle_data>::result_type secHit = intersectVisible(carReflRay,accel,vertices,indices,geometries,uniforms);
-                float3 envRefl = sampleEnvironment(reflDir,uniforms.renderOptions.x);
-                if (secHit.type == intersection_type::triangle) {
-                    GeometryInfo secMat = geometries[secHit.geometry_id];
-                    applyTrim(secMat,uniforms);
-                    uint si=secMat.indexOffset+secHit.primitive_id*3;
-                    Vertex va=vertices[indices[si]], vb=vertices[indices[si+1]], vc=vertices[indices[si+2]];
-                    float2 sb=secHit.triangle_barycentric_coord; float sw=1.0-sb.x-sb.y;
-                    float3 sn=normalize(va.normal.xyz*sw+vb.normal.xyz*sb.x+vc.normal.xyz*sb.y);
-                    if (dot(sn,reflDir)>0.0) sn=-sn;
-                    float4 suv=va.uv*sw+vb.uv*sb.x+vc.uv*sb.y;
-                    float3 sp=carReflRay.origin+reflDir*secHit.distance;
-                    envRefl=secMat.isGround==1 ? lighting.groundColor*(lighting.ambientColor+lighting.keyColor*0.25)
-                        : surfaceRadiance(secMat,sn,-reflDir,sp,suv,uniforms,sourceTextures);
+                // Layer normals: the clearcoat carries a faint orange-peel wave,
+                // the base carries randomly oriented metallic flakes.
+                float3 coatN = normal, flakeN = normal;
+                float baseRough = roughness, coatRough = 0.05;
+                float flakeSparkle = 0.0;
+                if (isPaint) {
+                    float2 peel = float2(noise2(hitPos.xz*38.0+hitPos.y*21.0), noise2(hitPos.zy*38.0+hitPos.x*17.0)) - 0.5;
+                    coatN = normalize(normal + (tangent*peel.x + bitangent*peel.y)*0.010*(1.0-wet));
+                    float3 cell = floor(fmod(abs(hitPos)*1400.0, 8192.0));
+                    float3 tilt = float3(hash31(cell), hash31(cell+17.13), hash31(cell+41.71)) - 0.5;
+                    flakeN = normalize(normal + (tangent*tilt.x + bitangent*tilt.y)*0.22*metallic);
+                    flakeSparkle = step(0.93, hash31(cell+7.7))*metallic;
+                    baseRough = mix(roughness, clamp(roughness*2.2+0.14, 0.2, 0.62), clearcoat);
+                    coatRough = clamp(roughness*0.22, 0.012, 0.06);
+                } else if (isStainlessSteel) {
+                    float grain = (noise2(hitPos.xz*450.0 + hitPos.y*120.0) - 0.5)*0.045;
+                    baseRough = clamp(roughness + grain, 0.05, 1.0);
                 }
 
                 float NdotV = max(dot(normal, viewDir), 0.001);
-                float3 F0=mix(float3(0.04),baseCol,metallic);
+                float3 F0 = mix(float3(0.04), baseCol, metallic);
                 if (isStainlessSteel) { F0 = max(F0, float3(0.78, 0.80, 0.82)); }
-                float3 envF=fresnelSchlick(NdotV,F0);
-                float3 direct=directBRDF(normal,viewDir,lightDir,baseCol,metallic,max(roughness,areaRoughness))*lighting.keyColor*shadow;
-                float3 ambient=baseCol*lighting.ambientColor*(1.0-metallic)*materialAO;
-                float3 metalRefl=envRefl*envF*(isStainlessSteel ? (1.0-roughness*0.25) : (1.0-roughness*0.5));
-                if ((mat.textures.w & 128)!=0) { direct*=0.8; metalRefl*=0.05; }
-                float coatF=0.04+0.96*pow(1.0-NdotV,5.0);
-                float3 coat=directBRDF(normal,viewDir,lightDir,float3(0),0.0,max(0.10,areaRoughness))*lighting.keyColor*shadow
-                    +sampleEnvironment(reflect(rayDir,normal),uniforms.renderOptions.x)*coatF;
-                direct+=rearPanelLight(hitPos,normal,viewDir,baseCol,metallic,roughness,uniforms);
-                color=(direct+ambient+metalRefl)*(1.0-clearcoat*coatF)+coat*clearcoat
+                float3 envF = fresnelSchlick(NdotV, F0);
+
+                // Base layer: GGX importance-sampled reflection through the scene.
+                float3 baseDir = sampleGGXReflection(normal, viewDir, max(baseRough, 0.02), seed);
+                float3 baseRefl = traceRadiance(hitPos + normal*0.003, baseDir, 45.0, accel, vertices, indices, geometries, uniforms, sourceTextures);
+                float3 specBase = baseRefl*envF*mix(1.0, 0.72, baseRough);
+
+                // Diffuse: cosine-sampled sky/bounce ray = real ambient occlusion + GI.
+                float3 giDir = sampleCosine(normal, seed);
+                // Clamp keeps small hot emitters from producing slow-converging speckle.
+                float3 irradiance = min(traceIrradiance(hitPos + normal*0.003, giDir, accel, vertices, indices, geometries, uniforms, sourceTextures), float3(2.5));
+                float3 diffuseGI = baseCol*(1.0-metallic)*irradiance*materialAO;
+                // Metallic pigment still scatters some colored light under the coat.
+                if (isPaint) diffuseGI += baseCol*metallic*0.18*irradiance*materialAO;
+
+                float3 direct = directBRDF(flakeN, viewDir, lightDir, baseCol, metallic, max(baseRough, areaRoughness))*lighting.keyColor*shadow;
+                if (isPaint) {
+                    // Glints: individual flakes catching the key light.
+                    float3 h = normalize(lightDir + viewDir);
+                    direct += baseCol*lighting.keyColor*shadow*flakeSparkle*pow(max(dot(flakeN,h),0.0),220.0)*0.8*max(dot(normal,lightDir),0.0);
+                }
+                if (isRubber) { direct *= 0.8; specBase *= 0.05; }
+                direct += rearPanelLight(hitPos, normal, viewDir, baseCol, metallic, roughness, uniforms);
+
+                float3 layered = direct + diffuseGI + specBase;
+                if (clearcoat > 0.02) {
+                    float coatNV = max(dot(coatN, viewDir), 0.001);
+                    float coatF = 0.04 + 0.96*pow(1.0-coatNV, 5.0);
+                    float3 coatDir = sampleGGXReflection(coatN, viewDir, coatRough, seed);
+                    float3 coatRefl = traceRadiance(hitPos + normal*0.003, coatDir, 60.0, accel, vertices, indices, geometries, uniforms, sourceTextures);
+                    float3 coatDirect = directBRDF(coatN, viewDir, lightDir, float3(0), 0.0, max(coatRough, areaRoughness))*lighting.keyColor*shadow;
+                    layered = layered*(1.0 - clearcoat*coatF) + clearcoat*(coatDirect + coatRefl*coatF);
+                }
+                color = layered
                      +(mat.isGround==3 ? float3(0.0,0.35,1.0)*emissive : (mat.isGround==4 ? baseCol*emissive : emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms)));
                 if (uniforms.renderOptions.x>3.5) {
                     // Colored off-camera practicals provide matching neon highlights.
@@ -822,11 +938,17 @@ public struct ShaderSource {
             }
         }
 
+        // Firefly suppression: clamp per-sample luminance and reject NaNs so
+        // thin strip lights seen through GGX lobes converge cleanly.
+        if (any(isnan(color)) || any(isinf(color))) color = float3(0.0);
+        float sampleLum = dot(color, float3(0.2126,0.7152,0.0722));
+        if (sampleLum > 16.0) color *= 16.0/sampleLum;
+
         float4 prev = (isAccumulating == 1 && sampleIndex > 0) ? accumTex.read(gid) : float4(0.0);
         float4 blended = mix(float4(color, 1.0), prev, float(sampleIndex) / float(sampleIndex + 1));
         accumTex.write(blended, gid);
 
-        // ACES Film Tone Mapping
+        // ACES Film Tone Mapping (fallback; postProcessKernel overwrites this)
         float3 col = max(blended.rgb*uniforms.renderOptions.y,float3(0.0));
         float3 a = col * (col + 0.0245786) - 0.000090537;
         float3 b = col * (0.983729 * col + 0.4329510) + 0.238081;
@@ -836,6 +958,102 @@ public struct ShaderSource {
         mapped = pow(mapped, float3(1.0 / 2.2));
 
         outputTex.write(float4(mapped, 1.0), gid);
+    }
+
+    // ============================================================
+    // CINEMATIC POST: bloom, filmic tone curve, lens effects
+    // ============================================================
+    kernel void bloomBrightPass(
+        texture2d<float, access::read> accumTex [[texture(0)]],
+        texture2d<float, access::write> bloomTex [[texture(1)]],
+        constant Uniforms &uniforms [[buffer(0)]],
+        uint2 gid [[thread_position_in_grid]])
+    {
+        if (gid.x >= uniforms.viewport.x || gid.y >= uniforms.viewport.y) return;
+        float3 c = max(accumTex.read(gid).rgb*uniforms.renderOptions.y, float3(0.0));
+        float lum = dot(c, float3(0.2126,0.7152,0.0722));
+        // Soft-knee threshold keeps bloom to genuinely hot highlights.
+        float knee = 0.6, threshold = 1.1;
+        float soft = clamp(lum - threshold + knee, 0.0, 2.0*knee);
+        soft = soft*soft/(4.0*knee + 1e-4);
+        float contrib = max(soft, lum - threshold)/max(lum, 1e-4);
+        bloomTex.write(float4(min(c*contrib, float3(64.0)), 1.0), gid);
+    }
+
+    static float3 tentSample(texture2d<float> t, sampler s, float2 uv, float lod, float2 texel) {
+        float2 o = texel*exp2(lod);
+        float3 c = t.sample(s, uv, level(lod)).rgb*4.0;
+        c += (t.sample(s, uv+float2(o.x,0), level(lod)).rgb + t.sample(s, uv-float2(o.x,0), level(lod)).rgb
+            + t.sample(s, uv+float2(0,o.y), level(lod)).rgb + t.sample(s, uv-float2(0,o.y), level(lod)).rgb)*2.0;
+        c += t.sample(s, uv+o, level(lod)).rgb + t.sample(s, uv-o, level(lod)).rgb
+           + t.sample(s, uv+float2(o.x,-o.y), level(lod)).rgb + t.sample(s, uv+float2(-o.x,o.y), level(lod)).rgb;
+        return c/16.0;
+    }
+
+    static float3 acesFitted(float3 c) {
+        const float3x3 inputMat = float3x3(float3(0.59719,0.07600,0.02840),
+                                           float3(0.35458,0.90834,0.13383),
+                                           float3(0.04823,0.01566,0.83777));
+        const float3x3 outputMat = float3x3(float3( 1.60475,-0.10208,-0.00327),
+                                            float3(-0.53108, 1.10813,-0.07276),
+                                            float3(-0.07367,-0.00605, 1.07602));
+        c = inputMat*c;
+        float3 a = c*(c + 0.0245786) - 0.000090537;
+        float3 b = c*(0.983729*c + 0.4329510) + 0.238081;
+        return clamp(outputMat*(a/b), 0.0, 1.0);
+    }
+
+    static float3 linearToSRGB(float3 c) {
+        return select(1.055*pow(c, float3(1.0/2.4)) - 0.055, c*12.92, c <= 0.0031308);
+    }
+
+    kernel void postProcessKernel(
+        texture2d<float, access::read> accumTex [[texture(0)]],
+        texture2d<float> bloomTex [[texture(1)]],
+        texture2d<float, access::write> outputTex [[texture(2)]],
+        constant Uniforms &uniforms [[buffer(0)]],
+        uint2 gid [[thread_position_in_grid]])
+    {
+        uint w = uniforms.viewport.x, h = uniforms.viewport.y;
+        if (gid.x >= w || gid.y >= h) return;
+        constexpr sampler linearSmp(coord::normalized, address::clamp_to_edge, filter::linear, mip_filter::linear);
+        float2 size = float2(w, h);
+        float2 uv = (float2(gid) + 0.5)/size;
+        float2 centered = uv - 0.5;
+        float exposure = uniforms.renderOptions.y;
+
+        // Subtle lateral chromatic aberration toward the frame edges.
+        float2 caOffset = centered*dot(centered, centered)*0.35;
+        int2 maxP = int2(w-1, h-1);
+        int2 pr = clamp(int2(float2(gid) + caOffset*size*0.012), int2(0), maxP);
+        int2 pb = clamp(int2(float2(gid) - caOffset*size*0.012), int2(0), maxP);
+        float3 hdr = float3(accumTex.read(uint2(pr)).r, accumTex.read(gid).g, accumTex.read(uint2(pb)).b)*exposure;
+
+        // Multi-scale bloom from the bright-pass mip chain.
+        float2 texel = 1.0/size;
+        float3 bloom = tentSample(bloomTex, linearSmp, uv, 1.0, texel)*0.30
+                     + tentSample(bloomTex, linearSmp, uv, 2.0, texel)*0.26
+                     + tentSample(bloomTex, linearSmp, uv, 3.0, texel)*0.20
+                     + tentSample(bloomTex, linearSmp, uv, 4.0, texel)*0.13
+                     + tentSample(bloomTex, linearSmp, uv, 5.0, texel)*0.07
+                     + tentSample(bloomTex, linearSmp, uv, 6.0, texel)*0.04;
+        float bloomStrength = uniforms.renderOptions.x > 3.5 ? 0.22 : 0.12;
+        hdr += bloom*bloomStrength;
+
+        // Optical vignette (cos^4-like falloff).
+        float2 vc = centered*float2(size.x/size.y, 1.0);
+        float vignette = 1.0 - 0.38*smoothstep(0.25, 1.05, length(vc));
+        hdr *= vignette;
+
+        float3 mapped = acesFitted(max(hdr, float3(0.0)));
+        // Gentle saturation lift typical of a racing-game grade.
+        float l = dot(mapped, float3(0.2126,0.7152,0.0722));
+        mapped = clamp(mix(float3(l), mapped, 1.08), 0.0, 1.0);
+        float3 display = linearToSRGB(mapped);
+        // Static film grain doubles as dither against banding in dark gradients.
+        float grain = fract(sin(dot(float2(gid), float2(12.9898,78.233)))*43758.5453) - 0.5;
+        display += grain*(1.5/255.0);
+        outputTex.write(float4(clamp(display, 0.0, 1.0), 1.0), gid);
     }
     """
 }

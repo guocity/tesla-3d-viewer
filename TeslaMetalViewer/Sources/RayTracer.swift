@@ -79,8 +79,43 @@ public class RayTracer {
             desc.computeFunction = function
             desc.threadGroupSizeIsMultipleOfThreadExecutionWidth = true
             self.pipelineState = try device.makeComputePipelineState(descriptor: desc, options: [], reflection: nil)
+            if let bright = library.makeFunction(name: "bloomBrightPass"),
+               let post = library.makeFunction(name: "postProcessKernel") {
+                self.brightPassPipeline = try device.makeComputePipelineState(function: bright)
+                self.postPipeline = try device.makeComputePipelineState(function: post)
+            }
         } catch {
             fatalError("Failed to compile Metal Ray Tracing pipeline: \(error)")
+        }
+    }
+
+    private var brightPassPipeline: MTLComputePipelineState?
+    private var postPipeline: MTLComputePipelineState?
+    private var bloomTexture: MTLTexture?
+
+    /// Bloom bright-pass -> mip chain -> filmic tone mapping into outputTexture.
+    private func encodePostProcess(_ cmd: MTLCommandBuffer, uniforms: MTLBuffer, width w: Int, height h: Int) {
+        guard let bright = brightPassPipeline, let post = postPipeline,
+              let accum = accumTexture, let bloom = bloomTexture, let output = outputTexture else { return }
+        let tpg = MTLSize(width: 16, height: 16, depth: 1)
+        let groups = MTLSize(width: (w+15)/16, height: (h+15)/16, depth: 1)
+        if let enc = cmd.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(bright)
+            enc.setTexture(accum, index: 0); enc.setTexture(bloom, index: 1)
+            enc.setBuffer(uniforms, offset: 0, index: 0)
+            enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tpg)
+            enc.endEncoding()
+        }
+        if let blit = cmd.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: bloom)
+            blit.endEncoding()
+        }
+        if let enc = cmd.makeComputeCommandEncoder() {
+            enc.setComputePipelineState(post)
+            enc.setTexture(accum, index: 0); enc.setTexture(bloom, index: 1); enc.setTexture(output, index: 2)
+            enc.setBuffer(uniforms, offset: 0, index: 0)
+            enc.dispatchThreadgroups(groups, threadsPerThreadgroup: tpg)
+            enc.endEncoding()
         }
     }
 
@@ -340,6 +375,11 @@ public class RayTracer {
         outDesc.storageMode = .private
         outputTexture = device.makeTexture(descriptor: outDesc)
 
+        let bloomDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: width, height: height, mipmapped: true)
+        bloomDesc.usage = [.shaderRead, .shaderWrite]
+        bloomDesc.storageMode = .private
+        bloomTexture = device.makeTexture(descriptor: bloomDesc)
+
         resetAccumulation()
     }
 
@@ -433,6 +473,7 @@ public class RayTracer {
         )
         enc.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadsPerGroup)
         enc.endEncoding()
+        encodePostProcess(cmd, uniforms: ub, width: w, height: h)
 
         // Blit output texture to MTKView drawable
         if let blitEnc = cmd.makeBlitCommandEncoder() {
@@ -526,6 +567,13 @@ public class RayTracer {
             )
             enc.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadsPerGroup)
             enc.endEncoding()
+            cmd.commit()
+            cmd.waitUntilCompleted()
+        }
+
+        if let ub = device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformsGPU>.stride, options: .storageModeShared),
+           let cmd = commandQueue.makeCommandBuffer() {
+            encodePostProcess(cmd, uniforms: ub, width: w, height: h)
             cmd.commit()
             cmd.waitUntilCompleted()
         }
