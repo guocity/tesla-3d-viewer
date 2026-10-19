@@ -59,7 +59,7 @@ public class RayTracer {
 
     private func sizeDrawable(_ view: MTKView, moving: Bool) {
         let now = ProcessInfo.processInfo.systemUptime
-        if moving && now - lastScaleUpdate > 0.5 {
+        if renderMode != .realtime && moving && now - lastScaleUpdate > 0.5 {
             let budget = 0.85 / Double(max(60, view.preferredFramesPerSecond))
             if gpuFrameSeconds > budget * 1.1 {
                 motionScale = max(0.35, motionScale * max(0.8, sqrt(budget / gpuFrameSeconds)))
@@ -69,7 +69,11 @@ public class RayTracer {
             lastScaleUpdate = now
         }
         let full = view.convertToBacking(view.bounds).size
-        let scale = moving ? motionScale : 1
+        // Real-time uses a stable pixel budget, including during camera motion.
+        // GPU timing feedback otherwise oscillates resolution and causes shimmer.
+        let scale = renderMode == .realtime
+            ? min(1, sqrt(600_000 / max(1, full.width * full.height)))
+            : (moving ? motionScale : 1)
         let size = CGSize(width: max(1, (full.width * scale).rounded()),
                           height: max(1, (full.height * scale).rounded()))
         if view.drawableSize != size { view.drawableSize = size }
@@ -446,7 +450,7 @@ public class RayTracer {
             let library=try device.makeLibrary(source:ShaderSource.metalRaytracingSource,options:nil)
             var uniforms=UniformsGPU(); uniforms.tintParams=SIMD4(1,0.505,0.5,0)
             guard let function=library.makeFunction(name:"cabinOpticsProbe"),
-                  let output=device.makeBuffer(length:8*MemoryLayout<Float>.stride,options:.storageModeShared),
+                  let output=device.makeBuffer(length:16*MemoryLayout<Float>.stride,options:.storageModeShared),
                   let ub=device.makeBuffer(bytes:&uniforms,length:MemoryLayout<UniformsGPU>.stride,options:.storageModeShared),
                   let command=commandQueue.makeCommandBuffer(),let encoder=command.makeComputeCommandEncoder() else { return nil }
             let pipeline=try device.makeComputePipelineState(function:function)
@@ -458,7 +462,7 @@ public class RayTracer {
             encoder.dispatchThreads(MTLSize(width:8,height:1,depth:1),threadsPerThreadgroup:MTLSize(width:8,height:1,depth:1))
             encoder.endEncoding();command.commit();command.waitUntilCompleted()
             guard command.status == .completed else { return nil }
-            return Array(UnsafeBufferPointer(start:output.contents().assumingMemoryBound(to:Float.self),count:8))
+            return Array(UnsafeBufferPointer(start:output.contents().assumingMemoryBound(to:Float.self),count:16))
         } catch { print("Cabin optics probe failed: \(error)"); return nil }
     }
 

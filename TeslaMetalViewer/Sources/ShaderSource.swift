@@ -58,11 +58,11 @@ public struct ShaderSource {
     };
     static Lighting lightingForPreset(float preset) {
         if (preset < 0.5) return {float3(5.5,9.5,6.5),float3(2.0,1.94,1.85),float3(0.16,0.18,0.21),float3(0.05,0.055,0.062),3.0};
-        if (preset < 1.5) return {float3(-8,35,15),float3(1.25,1.35,1.5),float3(0.42,0.48,0.58),float3(0.16,0.175,0.19),22.0};
-        if (preset < 2.5) return {float3(-45,12,32),float3(3.6,1.95,0.82),float3(0.22,0.30,0.46),float3(0.17,0.13,0.095),1.2};
+        if (preset < 1.5) return {float3(-800,3500,1500),float3(0.85,0.94,1.08),float3(0.38,0.43,0.50),float3(0.15,0.16,0.17),2400.0};
+        if (preset < 2.5) return {float3(-4500,1200,3200),float3(3.8,2.15,1.05),float3(0.23,0.30,0.43),float3(0.16,0.145,0.12),52.0};
         if (preset > 4.5) return {float3(-18,25,12),float3(1.6,1.85,2.2),float3(0.24,0.30,0.38),float3(0.065,0.075,0.085),14.0};
         if (preset > 3.5) return {float3(5,8,5),float3(1.3,1.65,2.1),float3(0.085,0.12,0.19),float3(0.025,0.032,0.045),2.0};
-        return {float3(22,9,-30),float3(0.8,1.05,1.7),float3(0.14,0.21,0.38),float3(0.07,0.085,0.12),4.0};
+        return {float3(2200,900,-3000),float3(0.38,0.53,0.82),float3(0.12,0.18,0.30),float3(0.065,0.075,0.095),1800.0};
     }
 
     // Deterministic world-space detail: no downloaded textures or scene assets.
@@ -120,19 +120,50 @@ public struct ShaderSource {
             return sky;
         }
         if (preset >= 0.5) {
-            float3 zenith, horizon, ground;
-            if (preset < 1.5) {
-                zenith=float3(0.5,0.6,0.75); horizon=float3(0.85,0.88,0.9); ground=float3(0.15,0.17,0.19);
-            } else if (preset < 2.5) {
-                zenith=float3(0.16,0.29,0.52); horizon=float3(1.05,0.51,0.20); ground=float3(0.14,0.10,0.07);
-            } else {
-                zenith=float3(0.035,0.075,0.18); horizon=float3(0.3,0.25,0.37); ground=float3(0.035,0.045,0.07);
-            }
-            float3 sky = y >= 0 ? mix(horizon,zenith,pow(y,0.45)) : mix(horizon,ground,smoothstep(0.0,0.22,-y));
             Lighting l=lightingForPreset(preset);
-            float sun=max(dot(dir,normalize(l.keyPosition)),0.0);
-            if (preset > 1.5) sky += l.keyColor*(pow(sun,600.0)*3.0+pow(sun,12.0)*0.12);
-            return sky;
+            float3 sunDirection=normalize(l.keyPosition);
+            float sunAlignment=max(dot(dir,sunDirection),0.0);
+            float elevation=max(y,0.0);
+            float3 zenith, horizon;
+            if (preset < 1.5) {
+                zenith=float3(0.50,0.58,0.70); horizon=float3(0.88,0.91,0.94);
+            } else if (preset < 2.5) {
+                zenith=float3(0.14,0.29,0.56); horizon=float3(0.65,0.57,0.48);
+            } else {
+                zenith=float3(0.025,0.055,0.14); horizon=float3(0.23,0.27,0.39);
+            }
+            float3 sky=mix(horizon,zenith,pow(elevation,0.42));
+            // Continuous cloud layers create broad reflected shapes in glass,
+            // paint and metal rather than the same uniform gradient everywhere.
+            float2 cloudUV=dir.xz/(0.28+elevation)*1.8;
+            float cloud=noise2(cloudUV)*0.60+noise2(cloudUV*2.1+13.7)*0.28
+                       +noise2(cloudUV*4.3+5.1)*0.12;
+            float cloudCover=smoothstep(0.36,0.72,cloud)*smoothstep(0.0,0.16,elevation);
+            if (preset < 1.5) {
+                sky*=mix(0.72,1.17,cloud);
+                sky+=float3(0.30,0.32,0.34)*pow(sunAlignment,5.0);
+                sky=mix(sky,sky*0.74+float3(0.16,0.17,0.18),cloudCover*0.6);
+            } else if (preset < 2.5) {
+                // Warm light is localized toward the sunset; the opposite sky
+                // remains cool, giving the body natural warm/cool separation.
+                float sunset=pow(sunAlignment,6.0)*exp(-elevation*1.7);
+                sky+=float3(1.25,0.44,0.12)*sunset;
+                sky=mix(sky,sky*0.48+float3(0.33,0.23,0.20),cloudCover*0.65);
+                float disk=smoothstep(cos(0.0055),cos(0.0035),sunAlignment);
+                sky+=l.keyColor*(disk*12.0+pow(sunAlignment,150.0)*0.18);
+            } else {
+                // Twilight is diffuse skylight, without a spurious blue sun.
+                float afterglow=pow(max(dot(dir,normalize(float3(-1,0.03,0.6))),0.0),5.0)
+                               *exp(-elevation*8.0);
+                sky+=float3(0.25,0.09,0.055)*afterglow;
+                sky=mix(sky,sky*0.55+float3(0.025,0.035,0.065),cloudCover*0.7);
+            }
+            // A low distant landscape breaks up the horizon in reflections.
+            float azimuth=atan2(dir.z,dir.x);
+            float ridge=0.006+0.006*sin(azimuth*5.0)+0.003*sin(azimuth*13.0);
+            float terrain=1.0-smoothstep(ridge-0.004,ridge+0.004,y);
+            float3 earth=l.groundColor*(l.ambientColor+l.keyColor*0.10);
+            return mix(sky,earth,terrain);
         }
         // Automotive photo studio: dark cyclorama, a large overhead softbox and
         // long strip lights that draw crisp highlight lines along the body.
@@ -265,23 +296,6 @@ public struct ShaderSource {
         }
         return e*mat.params.z;
     }
-    static float3 surfaceRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float4 uv,
-                                  constant Uniforms &u, array<texture2d<float>,32> textures) {
-        constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
-        applyFinish(mat,u);
-        float3 base=mat.isPaint==1 ? u.carPaintColor.xyz : mat.baseColor.xyz;
-        if (mat.textures.x>=0 && (mat.textures.w & 16)==0)
-            base*=pow(max(textures[mat.textures.x].sample(smp,uv.xy).rgb,0.0),float3(2.2));
-        float metal=mat.isPaint==1 ? u.carPaintColor.w : mat.baseColor.w;
-        float rough=mat.isPaint==1 ? u.params.x : mat.params.x;
-        Lighting l=lightingForPreset(u.renderOptions.x);
-        float3 env=sampleEnvironment(reflect(-v,n),u.renderOptions.x);
-        float3 F=fresnelSchlick(dot(n,v),mix(float3(0.04),base,metal));
-        if ((mat.textures.w & 1048576)!=0) F *= 0.18;
-        return directBRDF(n,v,normalize(l.keyPosition-p),base,metal,max(rough,sqrt(l.softSize/max(length(l.keyPosition-p),1.0))*0.36))*l.keyColor
-             +rearPanelLight(p,n,v,base,metal,rough,uint(mat.textures.w),u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
-    }
-
     // Visibility to the source airflow plane. Transparent interfaces transmit;
     // every opaque triangle, including a body panel behind a window, blocks it.
     static float airflowVisibility(float3 origin, float3 direction, float distance,
@@ -379,6 +393,93 @@ public struct ShaderSource {
         return 0.0;
     }
 
+    // Visibility of the diffuse hemisphere: roof, pillars, cushions and seat
+    // backs must occlude ambient fill as well as the direct key light.
+    static float upholsteryAmbientVisibility(float3 p, float3 n, constant Uniforms &u,
+                                             primitive_acceleration_structure accel,
+                                             device const Vertex *vertices, device const uint *indices,
+                                             constant GeometryInfo *geometries) {
+        float3 tangent=normalize(cross(abs(n.y)<0.95 ? float3(0,1,0) : float3(1,0,0),n));
+        float3 bitangent=cross(n,tangent);
+        float rotation=u.effectTextures.w==0 ? float(u.viewport.z)*2.39996323 : 0.0;
+        float visibility=0.0;
+        for (uint i=0;i<8;++i) {
+            float radius=sqrt((float(i)+0.5)/8.0), phi=float(i)*2.39996323+rotation;
+            float3 d=tangent*(radius*cos(phi))+bitangent*(radius*sin(phi))+n*sqrt(1.0-radius*radius);
+            ray ambient; ambient.origin=p+n*0.002; ambient.direction=normalize(d);
+            ambient.min_distance=0.0002; ambient.max_distance=1.2;
+            visibility+=lightVisibility(ambient,accel,vertices,indices,geometries,u)*0.125;
+        }
+        return visibility;
+    }
+
+    // Studio upholstery is the material reference in every lighting preset,
+    // render mode and visibility path (direct, through glass, and reflected).
+    static float3 upholsteryRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float4 uv,
+                                     constant Uniforms &u, array<texture2d<float>,32> textures,
+                                     primitive_acceleration_structure accel, device const Vertex *vertices,
+                                     device const uint *indices, constant GeometryInfo *geometries) {
+        constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
+        applyFinish(mat,u);
+        float3 base=mat.baseColor.xyz;
+        if (mat.textures.x>=0)
+            base*=pow(max(textures[mat.textures.x].sample(smp,uv.xy).rgb,0.0),float3(2.2));
+        float rough=mat.params.x;
+        if (mat.textures.y>=0) rough*=textures[mat.textures.y].sample(smp,uv.xy).g;
+        rough=max(rough,0.82); // Studio's restrained matte upholstery finish.
+        float ao=1.0;
+        if (mat.textures.z>=0) {
+            float4 sourceAO=textures[mat.textures.z].sample(smp,(mat.textures.w & 32)!=0 ? uv.zw : uv.xy);
+            ao=sourceAO[mat.textures.w & 3];
+        }
+        Lighting light=lightingForPreset(u.renderOptions.x);
+        float3 delta=light.keyPosition-p;
+        const float2 taps[4]={float2(-0.375,-0.125),float2(0.125,-0.375),
+                              float2(-0.125,0.375),float2(0.375,0.125)};
+        float visibility=0.0;
+        for (uint i=0;i<4;++i) {
+            float2 aperture=taps[i];
+            if (u.effectTextures.w==0) {
+                // Ray-traced Studio shadows converge across the entire aperture;
+                // reusing four fixed positions left visible stacked shadow bands.
+                float2 key=p.xz*137.0+float2(float(u.viewport.z)*17.13,float(i)*31.71);
+                aperture=float2(hash21(key),hash21(key+53.17))-0.5;
+            }
+            float3 d=delta+float3(aperture.x,0,aperture.y)*light.softSize;
+            ray shadow; shadow.origin=p+n*0.003; shadow.direction=normalize(d);
+            shadow.min_distance=0.0002; shadow.max_distance=length(d);
+            visibility+=lightVisibility(shadow,accel,vertices,indices,geometries,u)*0.25;
+        }
+        float ambientVisibility=upholsteryAmbientVisibility(p,n,u,accel,vertices,indices,geometries);
+        // A restrained bounce floor preserves detail in a closed cabin. Source
+        // AO remains an independent texture; it cannot replace geometry shadows.
+        float3 fill=light.ambientColor*(0.75+0.25*max(n.y,0.0))
+                   *mix(0.12,1.0,ambientVisibility);
+        return directBRDF(n,v,normalize(delta),base,0.0,rough)*light.keyColor*visibility
+             +base*fill*ao;
+    }
+
+    static float3 surfaceRadiance(GeometryInfo mat, float3 n, float3 v, float3 p, float4 uv,
+                                  constant Uniforms &u, array<texture2d<float>,32> textures,
+                                  primitive_acceleration_structure accel, device const Vertex *vertices,
+                                  device const uint *indices, constant GeometryInfo *geometries) {
+        constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
+        applyFinish(mat,u);
+        if ((mat.textures.w & (1048576 | 2097152))!=0)
+            return upholsteryRadiance(mat,n,v,p,uv,u,textures,accel,vertices,indices,geometries);
+        float3 base=mat.isPaint==1 ? u.carPaintColor.xyz : mat.baseColor.xyz;
+        if (mat.textures.x>=0 && (mat.textures.w & 16)==0)
+            base*=pow(max(textures[mat.textures.x].sample(smp,uv.xy).rgb,0.0),float3(2.2));
+        float metal=mat.isPaint==1 ? u.carPaintColor.w : mat.baseColor.w;
+        float rough=mat.isPaint==1 ? u.params.x : mat.params.x;
+        Lighting l=lightingForPreset(u.renderOptions.x);
+        float3 env=sampleEnvironment(reflect(-v,n),u.renderOptions.x);
+        float3 F=fresnelSchlick(dot(n,v),mix(float3(0.04),base,metal));
+        if ((mat.textures.w & 1048576)!=0) F *= 0.18;
+        return directBRDF(n,v,normalize(l.keyPosition-p),base,metal,max(rough,sqrt(l.softSize/max(length(l.keyPosition-p),1.0))*0.36))*l.keyColor
+             +rearPanelLight(p,n,v,base,metal,rough,uint(mat.textures.w),u)+base*l.ambientColor*(1.0-metal)+env*F*(1.0-rough*0.5)+(mat.isGround==4 ? base*mat.params.z : emittedLight(mat,uv,textures,u));
+    }
+
     kernel void cabinOpticsProbe(
         primitive_acceleration_structure accel [[buffer(0)]],
         device const Vertex *vertices [[buffer(1)]], device const uint *indices [[buffer(2)]],
@@ -388,6 +489,8 @@ public struct ShaderSource {
         ray r; r.origin=float3(float(id)*2.0,0,-2); r.direction=float3(0,0,1);
         r.min_distance=0.0002; r.max_distance=4.0;
         results[id]=lightVisibility(r,accel,vertices,indices,geometries,u);
+        results[id+8]=upholsteryAmbientVisibility(float3(float(id)*2.0,0,-0.03),float3(0,0,1),
+            u,accel,vertices,indices,geometries);
     }
 
     // ------------------------------------------------------------------
@@ -437,7 +540,7 @@ public struct ShaderSource {
         Lighting l = lightingForPreset(u.renderOptions.x);
         if (m.isGround == 1) return l.groundColor*(l.ambientColor + l.keyColor*0.25);
         float4 uv; float3 n = hitNormal(h,m,vertices,indices,dir,uv);
-        return surfaceRadiance(m,n,-dir,origin+dir*h.distance,uv,u,textures);
+        return surfaceRadiance(m,n,-dir,origin+dir*h.distance,uv,u,textures,accel,vertices,indices,geometries);
     }
     // Conservative one-bounce diffuse estimate: unshadowed key light is omitted
     // so wheel wells, panel gaps and the underbody stay properly occluded.
@@ -483,6 +586,14 @@ public struct ShaderSource {
     }
 
     static float3 realtimeEnvironment(float3 direction, float rough, float preset) {
+        // Broad analytic softboxes avoid undersampling the studio's narrow strips.
+        // Their width includes material roughness and stays continuous as normals move.
+        if (preset < 0.5) {
+            float exponent=mix(18.0,3.0,clamp(rough,0.0,1.0));
+            float key=pow(max(dot(direction,normalize(float3(-0.6,0.8,0.4))),0.0),exponent);
+            float fill=pow(max(dot(direction,normalize(float3(0.8,0.5,-0.3))),0.0),exponent);
+            return float3(0.13,0.14,0.16)+float3(1.2,1.15,1.1)*key+float3(0.6,0.65,0.75)*fill;
+        }
         float3 tangent=normalize(cross(direction,abs(direction.y)<0.98 ? float3(0,1,0) : float3(1,0,0)));
         float3 bitangent=cross(direction,tangent);
         float radius=max(0.003,rough*rough*0.55);
@@ -493,13 +604,13 @@ public struct ShaderSource {
              +sampleEnvironment(normalize(direction-bitangent*radius),preset))*0.15;
     }
 
-    // Deterministic single-frame preview: primary visibility and hard key-light
-    // shadows only. Reflections come from the environment; no GI or glossy
-    // secondary scene rays, area-light noise or progressive accumulation.
+    // Deterministic single-frame preview with spatial antialiasing and a fixed
+    // area-light quadrature. No temporal noise or progressive convergence.
     static float3 realtimeRadiance(ray r, typename intersector<triangle_data>::result_type h,
                                    primitive_acceleration_structure accel, device const Vertex *vertices,
                                    device const uint *indices, constant GeometryInfo *geometries,
-                                   constant Uniforms &u, array<texture2d<float>,32> textures) {
+                                   constant Uniforms &u, array<texture2d<float>,32> textures,
+                                   uint spatialSample) {
         constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
         float3 result=float3(0), throughput=float3(1);
         uint paneGroup=0xffffffffu; float paneTransmission=1.0;
@@ -516,7 +627,7 @@ public struct ShaderSource {
                 float F=0.04+0.96*pow(1.0-max(dot(n,v),0.0),5.0);
                 if ((m.textures.w & 64)!=0) F*=u.renderOptions.w;
                 if (!samePane) {
-                    result+=throughput*F*sampleEnvironment(reflect(r.direction,n),u.renderOptions.x);
+                    result+=throughput*F*realtimeEnvironment(reflect(r.direction,n),0.08,u.renderOptions.x);
                     throughput*=1.0-F;
                 }
                 throughput*=t;
@@ -526,6 +637,8 @@ public struct ShaderSource {
                 h=intersectVisible(r,accel,vertices,indices,geometries,u);
                 continue;
             }
+            if ((m.textures.w & (1048576 | 2097152))!=0)
+                return result+throughput*upholsteryRadiance(m,n,v,p,uv,u,textures,accel,vertices,indices,geometries);
             float3 base=m.isPaint==1 ? u.carPaintColor.xyz : m.baseColor.xyz;
             float metal=m.isPaint==1 ? u.carPaintColor.w : m.baseColor.w;
             float rough=m.isPaint==1 ? u.params.x : m.params.x;
@@ -570,17 +683,59 @@ public struct ShaderSource {
             float3 delta=light.keyPosition-p, l=normalize(delta);
             float shadow=1.0;
             if (m.params.z<=0.0) {
-                ray sr; sr.origin=p+n*0.004; sr.direction=l; sr.min_distance=0.003; sr.max_distance=length(delta);
-                shadow=lightVisibility(sr,accel,vertices,indices,geometries,u);
+                const float2 taps[4]={float2(-0.375,-0.125),float2(0.125,-0.375),
+                                      float2(-0.125,0.375),float2(0.375,0.125)};
+                // Distribute the light quadrature over the four pixel samples.
+                // This needs one visibility ray per sample instead of sixteen per pixel.
+                {
+                    float2 tap=taps[spatialSample];
+                    float3 toLight=delta+float3(tap.x,0,tap.y)*light.softSize;
+                    ray sr; sr.origin=p+n*0.004; sr.direction=normalize(toLight);
+                    sr.min_distance=0.003; sr.max_distance=length(toLight);
+                    shadow=lightVisibility(sr,accel,vertices,indices,geometries,u);
+                }
             }
             float3 F=fresnelSchlick(max(dot(n,v),0.0),mix(float3(0.04),base,metal));
             if ((m.textures.w & 1048576)!=0) F*=0.18;
             if ((m.textures.w & 128)!=0) F*=0.05;
             float3 env=realtimeEnvironment(reflect(-v,n),rough,u.renderOptions.x);
-            float3 color=directBRDF(n,v,l,base,metal,max(rough,0.08))*light.keyColor*shadow
-                        +base*light.ambientColor*(1.0-metal)*ao+env*F*(1.0-rough*0.65);
+            // A finite studio softbox cannot produce a point-sized specular flash.
+            float specularFloor=u.renderOptions.x<0.5 ? 0.28 : 0.08;
+            float3 ambient=base*light.ambientColor*(1.0-metal)*ao;
+            // Rough metallic paint also receives the broad environment lobe.
+            // Previously its diffuse term vanished with no replacement fill.
+            ambient+=base*light.ambientColor*metal*(0.65+0.35*max(n.y,0.0))*ao;
+            float3 color=directBRDF(n,v,l,base,metal,max(rough,specularFloor))*light.keyColor*shadow
+                        +ambient+env*F*(1.0-rough*0.65);
             if (coat>0.02)
-                color+=coat*(env*0.04+directBRDF(n,v,l,float3(0),0.0,max(rough*0.3,0.1))*light.keyColor*shadow);
+                color+=coat*(env*0.04+directBRDF(n,v,l,float3(0),0.0,max(rough*0.3,specularFloor))*light.keyColor*shadow);
+            if (m.isGround==1) {
+                // Keep the studio floor matte and anchor the tires/underbody.
+                ray contact; contact.origin=p+float3(0,0.008,0);
+                contact.direction=float3(0,1,0); contact.min_distance=0.004; contact.max_distance=1.1;
+                auto obstruction=intersectVisible(contact,accel,vertices,indices,geometries,u);
+                float contactAO=obstruction.type==intersection_type::triangle
+                    ? mix(0.28,1.0,smoothstep(0.0,1.1,obstruction.distance)) : 1.0;
+                color=base*(light.ambientColor+light.keyColor*max(dot(n,l),0.0)*shadow*0.4)*contactAO;
+                if (coat>0.02) {
+                    // One bounded reflection restores the car's floor reflection;
+                    // roughness fades it rather than introducing random glossy rays.
+                    ray reflection; reflection.origin=p+n*0.008;
+                    reflection.direction=reflect(-v,n); reflection.min_distance=0.01; reflection.max_distance=12.0;
+                    auto reflectedHit=intersectVisible(reflection,accel,vertices,indices,geometries,u);
+                    float3 reflected=realtimeEnvironment(reflection.direction,rough,u.renderOptions.x);
+                    if (reflectedHit.type==intersection_type::triangle) {
+                        GeometryInfo receiver=geometries[reflectedHit.geometry_id]; applyFinish(receiver,u);
+                        float4 reflectedUV;
+                        float3 reflectedNormal=hitNormal(reflectedHit,receiver,vertices,indices,reflection.direction,reflectedUV);
+                        reflected=surfaceRadiance(receiver,reflectedNormal,-reflection.direction,
+                            reflection.origin+reflection.direction*reflectedHit.distance,reflectedUV,u,textures,accel,vertices,indices,geometries);
+                    }
+                    float weight=clamp(coat*(0.08+0.22*pow(1.0-max(dot(n,v),0.0),5.0))
+                        *(1.0-clamp(rough,0.0,1.0)),0.0,0.3);
+                    color=mix(color,min(reflected,float3(2.0)),weight);
+                }
+            }
             color+=rearPanelLight(p,n,v,base,metal,rough,uint(m.textures.w),u);
             color+=m.isGround==4 ? base*m.params.z : emittedLight(m,uv,textures,u);
             if (m.isGround==3) {
@@ -637,7 +792,20 @@ public struct ShaderSource {
 
         bool realtime=uniforms.effectTextures.w!=0;
         if (realtime) {
-            color=realtimeRadiance(primaryRay,hit,accel,vertices,indices,geometries,uniforms,sourceTextures);
+            // Four fixed rotated-grid samples resolve silhouettes, glass edges
+            // and thin lettering in this frame, without temporal shimmer.
+            const float2 offsets[4]={float2(-0.375,-0.125),float2(0.125,-0.375),
+                                     float2(-0.125,0.375),float2(0.375,0.125)};
+            color=float3(0);
+            for (uint sample=0;sample<4;++sample) {
+                float2 subNDC=((float2(gid)+0.5+offsets[sample])/float2(width,height))*2.0-1.0;
+                subNDC.y=-subNDC.y;
+                float4 subTarget=uniforms.invProj*float4(subNDC,1,1);
+                ray subRay=primaryRay;
+                subRay.direction=normalize((uniforms.invView*float4(subTarget.xyz/subTarget.w,0)).xyz);
+                auto subHit=intersectVisible(subRay,accel,vertices,indices,geometries,uniforms);
+                color+=realtimeRadiance(subRay,subHit,accel,vertices,indices,geometries,uniforms,sourceTextures,sample)*0.25;
+            }
         } else if (hit.type == intersection_type::triangle) {
             uint geomId = hit.geometry_id;
             uint primId = hit.primitive_id;
@@ -713,9 +881,16 @@ public struct ShaderSource {
                 // NICE STUDIO GROUND & REAL VEHICLE REFLECTIONS
                 // ============================================================
                 float distFromCenter = length(hitPos.xz);
-                float vignette = weatherScene ? 1.0 : 1.0 - smoothstep(15.0, 45.0, distFromCenter);
+                float vignette = uniforms.renderOptions.x>=0.5 ? 1.0 : 1.0 - smoothstep(15.0, 45.0, distFromCenter);
 
                 float3 groundBase = lighting.groundColor;
+                bool outdoor=uniforms.renderOptions.x>=0.5 && uniforms.renderOptions.x<3.5;
+                if (outdoor) {
+                    // Subtle aggregate on a dry paved surface, without changing
+                    // the user's ground roughness/reflection controls.
+                    float aggregate=noise2(hitPos.xz*65.0)*0.7+noise2(hitPos.xz*170.0)*0.3;
+                    groundBase*=0.91+aggregate*0.18;
+                }
                 float puddle=puddleAt(hitPos.xz)*wet;
                 if (weatherScene) {
                     float grain=noise2(hitPos.xz*190.0);
@@ -779,7 +954,7 @@ public struct ShaderSource {
 
                     if (dot(cn,reflDir)>0.0) cn=-cn;
                     float4 cuv=cw*vertices[ci0].uv+cb.x*vertices[ci1].uv+cb.y*vertices[ci2].uv;
-                    reflectedColor=surfaceRadiance(carMat,cn,-reflDir,cHitPos,cuv,uniforms,sourceTextures);
+                    reflectedColor=surfaceRadiance(carMat,cn,-reflDir,cHitPos,cuv,uniforms,sourceTextures,accel,vertices,indices,geometries);
                 }
 
                 // Fresnel reflection factor
@@ -841,7 +1016,7 @@ public struct ShaderSource {
                     float4 ruv=ra.uv*rw+rb.uv*bary.x+rc.uv*bary.y;
                     float3 rp=glassReflRay.origin+reflDir*reflHit.distance;
                     reflColor=rMat.isGround==1 ? lighting.groundColor*(lighting.ambientColor+lighting.keyColor*0.25)
-                        : surfaceRadiance(rMat,rn,-reflDir,rp,ruv,uniforms,sourceTextures);
+                        : surfaceRadiance(rMat,rn,-reflDir,rp,ruv,uniforms,sourceTextures,accel,vertices,indices,geometries);
                 }
 
                 // 2. Ray-traced transmission ray passing through the glass into interior / headlights
@@ -892,7 +1067,11 @@ public struct ShaderSource {
                     float tEmissive = tMat.params.z;
 
                     // Interior shading: Chrome reflector, LED emitter, or cabin interior
-                    if (tEmissive > 0.1) {
+                    if ((tMat.textures.w & (1048576 | 2097152))!=0) {
+                        float4 seatUV=tw*vertices[ti0].uv+tb.x*vertices[ti1].uv+tb.y*vertices[ti2].uv;
+                        transColor=upholsteryRadiance(tMat,tn,viewDir,tHitPos,seatUV,uniforms,sourceTextures,
+                            accel,vertices,indices,geometries);
+                    } else if (tEmissive > 0.1) {
                         transColor = emittedLight(tMat,tw*vertices[ti0].uv+tb.x*vertices[ti1].uv+tb.y*vertices[ti2].uv,sourceTextures,uniforms);
                     } else if (tMetallic > 0.75) {
                         // Chrome reflector bowl inside headlight
@@ -936,6 +1115,9 @@ public struct ShaderSource {
                 // an opaque blue/gray surface or dim the front-surface reflection.
                 color = transColor*transmission*(1.0-fresnel)+reflColor*fresnel
                     +float3(glassSpec)+emittedLight(mat,float4(texUV,texUV2),sourceTextures,uniforms);
+            } else if ((mat.textures.w & (1048576 | 2097152))!=0) {
+                color=upholsteryRadiance(mat,normal,-rayDir,hitPos,float4(texUV,texUV2),uniforms,
+                    sourceTextures,accel,vertices,indices,geometries);
             } else {
                 // ============================================================
                 // METALLIC CAR BODY & TESLA DETAILS
