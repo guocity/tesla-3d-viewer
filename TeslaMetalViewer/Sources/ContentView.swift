@@ -18,6 +18,9 @@ public struct ContentView: View {
                     Button { state.selectModel(state.nextModel()); load() } label: {
                         Label("Next Model", systemImage: "chevron.right")
                     }.help("Load the next vehicle; wraps to the first after the last")
+                    Picker("Rendering",selection: $state.renderMode) {
+                        ForEach(RenderMode.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented).frame(width: 210)
                     Button { fit(.hero) } label: { Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right") }
                     Button { inspector.toggle() } label: { Image(systemName: "sidebar.right") }
                 }.padding(20)
@@ -26,7 +29,9 @@ public struct ContentView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         if let error = state.loadError { Text(error).foregroundStyle(.red) }
                         Text("Two fingers to orbit · Shift to pan · Pinch to zoom")
-                        Text("\(state.totalTriangles.formatted()) triangles · \(state.sampleCount)/256 samples")
+                        Text(state.renderMode == .realtime
+                             ? "\(state.totalTriangles.formatted()) triangles · Real-time"
+                             : "\(state.totalTriangles.formatted()) triangles · \(state.sampleCount)/256 samples")
                     }.font(.caption).foregroundStyle(.secondary).padding(16).allowsHitTesting(false)
                 }
                 HStack {
@@ -46,6 +51,17 @@ public struct ContentView: View {
                             Picker("Model", selection: Binding(get: { state.selectedModel.id }, set: { id in
                                 if let model = TeslaCatalog.models.first(where: { $0.id == id }) { state.selectModel(model); load() }
                             })) { ForEach(TeslaCatalog.models) { Text($0.name).tag($0.id) } }.labelsHidden().padding(8)
+                        }
+                        GroupBox("Rendering") {
+                            VStack(alignment: .leading,spacing: 8) {
+                                Picker("Mode",selection: $state.renderMode) {
+                                    ForEach(RenderMode.allCases) { Text($0.rawValue).tag($0) }
+                                }.labelsHidden()
+                                Text(state.renderMode == .realtime
+                                     ? "Fast, stable frames with simplified lighting and environment reflections."
+                                     : "Progressive lighting, scene reflections and soft shadows. Let the view settle for a cleaner image.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(8)
                         }
                         GroupBox("Source animation") {
                             VStack(alignment: .leading, spacing: 12) {
@@ -98,7 +114,8 @@ public struct ContentView: View {
                                     Toggle("Left Turn", isOn: $state.areLeftTurnSignalOn)
                                     Toggle("Right Turn", isOn: $state.areRightTurnSignalOn)
                                 }
-                                Toggle("Volumetric Light Beams", isOn: $state.showLightBeams).disabled(!state.areHeadlightsOn)
+                                Toggle("Volumetric Light Beams", isOn: $state.showLightBeams).disabled(!state.areHeadlightsOn || state.renderMode == .realtime)
+                                    .help("Volumetric beams are available in Ray traced mode")
                                 Toggle("Brake lights", isOn: $state.areBrakeLightsOn)
                                 if state.selectedModel.id == "cybertruck" {
                                     Toggle("Roof-mounted lightbar", isOn: $state.showRoofLightbar)

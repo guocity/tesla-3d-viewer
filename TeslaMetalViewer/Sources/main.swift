@@ -57,6 +57,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             exit(failures.isEmpty ? 0 : 1)
         }
 
+        if CommandLine.arguments.contains("--validate-render-modes") {
+            let failures = RenderingModeValidation.run(device: device)
+            print("Rendering mode validation failures: \(failures)")
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         if CommandLine.arguments.contains("--validate-struts") {
             let failures = StrutValidation.run(device: device)
             print("Strut validation failures: \(failures)")
@@ -257,6 +263,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let i = CommandLine.arguments.firstIndex(of: name), i+1 < CommandLine.arguments.count else { return nil }
                 return CommandLine.arguments[i+1]
             }
+            if let value = argument("--render-mode") {
+                switch value.lowercased() {
+                case "realtime", "real-time": rayTracer.renderMode = .realtime
+                case "raytraced", "ray-traced": rayTracer.renderMode = .rayTraced
+                default: print("Unknown render mode: " + value); exit(1)
+                }
+            }
             if let value = argument("--lighting") {
                 let key=value.lowercased().replacingOccurrences(of: "-",with: " ")
                 guard let lighting=LightingPreset.allCases.first(where: { $0.rawValue.lowercased() == key }) else { print("Unknown lighting: " + value); exit(1) }
@@ -363,8 +376,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(0)
             }
             
-            let renderSamples = max(1,min(1024,Int(argument("--samples") ?? "128") ?? 128))
-            print("Rendering \(renderSamples) ray-traced samples offscreen for \(model.name)...")
+            let renderSamples = rayTracer.renderMode == .realtime ? 1 : max(1,min(1024,Int(argument("--samples") ?? "128") ?? 128))
+            print("Rendering \(rayTracer.renderMode.rawValue): \(renderSamples) frame samples for \(model.name)...")
             if let cgImage = rayTracer.renderToImage(
                 width: 1400,
                 height: 900,
@@ -383,7 +396,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let dest = CGImageDestinationCreateWithURL(destUrl as CFURL, "public.png" as CFString, 1, nil) {
                     CGImageDestinationAddImage(dest, cgImage, nil)
                     CGImageDestinationFinalize(dest)
-                    print("Successfully saved ray-traced render to: \(outPath)")
+                    print("Successfully saved render to: \(outPath)")
                 }
             }
             exit(0)

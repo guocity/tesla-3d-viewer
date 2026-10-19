@@ -88,6 +88,10 @@ public class RayTracer {
     private var currentWidth: Int = 0
     private var currentHeight: Int = 0
 
+    public var renderMode: RenderMode = .rayTraced {
+        didSet { if oldValue != renderMode { resetAccumulation() } }
+    }
+    public private(set) var lastExportGPUSeconds: Double = 0
     public var sampleIndex: UInt32 = 0
     public let maxSamples: UInt32 = 256
     public var isDirty: Bool = true
@@ -514,7 +518,7 @@ public class RayTracer {
         let acquired = interactiveFrameAcquired
         interactiveFrameAcquired = false
         defer { if acquired && !submitted { framesInFlight.signal() } }
-        sizeDrawable(view, moving: isInteracting)
+        sizeDrawable(view, moving: isInteracting || renderMode == .realtime)
         guard let drawable = view.currentDrawable,
               let accel = accelerationStructure,
               let vb = vertexBuffer,
@@ -528,7 +532,7 @@ public class RayTracer {
         let targetPixelFormat = view.colorPixelFormat
         updateTextures(width: w, height: h, pixelFormat: targetPixelFormat)
 
-        if isInteracting {
+        if isInteracting || renderMode == .realtime {
             sampleIndex = 0
         } else if sampleIndex >= maxSamples {
             return // Converged
@@ -549,7 +553,7 @@ public class RayTracer {
         uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
-        uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
+        uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,renderMode == .realtime ? 1 : 0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4
         uniforms.climateRight = currentScene?.climatePlanes.dropFirst().first ?? matrix_identity_float4x4
         uniforms.invView = viewMat.inverse
@@ -557,7 +561,7 @@ public class RayTracer {
         uniforms.cameraPos = SIMD4<Float>(camera.position.x, camera.position.y, camera.position.z, 1.0)
         uniforms.carPaintColor = SIMD4<Float>(paintColor.x, paintColor.y, paintColor.z, metallic)
         uniforms.materialParams = SIMD4<Float>(roughness, clearcoat, groundReflectivity, groundRoughness)
-        uniforms.viewport = SIMD4<UInt32>(UInt32(w), UInt32(h), sampleIndex, isInteracting ? 0 : 1)
+        uniforms.viewport = SIMD4<UInt32>(UInt32(w), UInt32(h), sampleIndex, (isInteracting || renderMode == .realtime) ? 0 : 1)
         uniforms.tintParams = SIMD4<Float>(
             isPrivacyTint ? 1.0 : 0.0,
             tintTrans,
@@ -626,7 +630,9 @@ public class RayTracer {
         submitted = true
         cmd.commit()
 
-        if !isInteracting && sampleIndex < maxSamples {
+        if renderMode == .realtime {
+            sampleIndex = 1
+        } else if !isInteracting && sampleIndex < maxSamples {
             sampleIndex += 1
         }
     }
@@ -667,7 +673,7 @@ public class RayTracer {
         uniforms.interiorFinish = SIMD4(seatFinish.shaderIndex,0,0,0)
         uniforms.renderOptions = SIMD4(lighting.shaderIndex,exposure,windowTrim.shaderIndex,headlightReflection)
         uniforms.effectParams = SIMD4(effectTime,drivingSpeed,climateMode,signalState)
-        uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,0)
+        uniforms.effectTextures = SIMD4(currentScene?.roadTexture ?? -1,Int32(currentScene?.climatePlanes.count ?? 0),currentScene?.noiseTexture ?? -1,renderMode == .realtime ? 1 : 0)
         uniforms.climateLeft = currentScene?.climatePlanes.first ?? matrix_identity_float4x4
         uniforms.climateRight = currentScene?.climatePlanes.dropFirst().first ?? matrix_identity_float4x4
         uniforms.invView = viewMat.inverse
@@ -677,7 +683,9 @@ public class RayTracer {
         uniforms.materialParams = SIMD4<Float>(roughness, clearcoat, groundReflectivity, groundRoughness)
         uniforms.tintParams = SIMD4<Float>(isPrivacyTint ? 1.0 : 0.0, tintTrans, privacyTintDarkness, 0.0)
 
-        for s in 0..<samples {
+        lastExportGPUSeconds = 0
+        let renderSamples = renderMode == .realtime ? 1 : samples
+        for s in 0..<renderSamples {
             uniforms.viewport = SIMD4<UInt32>(UInt32(w), UInt32(h), UInt32(s), s > 0 ? 1 : 0)
             guard let ub = device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformsGPU>.stride, options: .storageModeShared),
                   let cmd = commandQueue.makeCommandBuffer(),
@@ -703,6 +711,7 @@ public class RayTracer {
             enc.endEncoding()
             cmd.commit()
             cmd.waitUntilCompleted()
+            lastExportGPUSeconds += max(0,cmd.gpuEndTime-cmd.gpuStartTime)
         }
 
         if let ub = device.makeBuffer(bytes: &uniforms, length: MemoryLayout<UniformsGPU>.stride, options: .storageModeShared),
@@ -710,6 +719,7 @@ public class RayTracer {
             encodePostProcess(cmd, uniforms: ub, width: w, height: h)
             cmd.commit()
             cmd.waitUntilCompleted()
+            lastExportGPUSeconds += max(0,cmd.gpuEndTime-cmd.gpuStartTime)
         }
 
         let bytesPerRow = w * 4

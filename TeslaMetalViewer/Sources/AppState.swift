@@ -15,6 +15,12 @@ public enum LightingPreset: String, CaseIterable, Identifiable {
     public var shaderIndex: Float { Float(Self.allCases.firstIndex(of: self) ?? 0) }
     public var isWeatherScene: Bool { self == .neonRain || self == .coastalStorm }
 }
+public enum RenderMode: String, CaseIterable, Identifiable {
+    case realtime = "Real-time"
+    case rayTraced = "Ray traced"
+    public var id: String { rawValue }
+}
+
 public enum WindowTrim: String, CaseIterable, Identifiable {
     case source = "Original", chrome = "Chrome", delete = "Chrome delete"
     public var id: String { rawValue }
@@ -60,6 +66,12 @@ public class AppState: ObservableObject {
         didSet { onMaterialChanged?() }
     }
 
+    @Published public var renderMode: RenderMode = RenderMode(rawValue: UserDefaults.standard.string(forKey: "viewerRenderMode") ?? "") ?? .realtime {
+        didSet {
+            UserDefaults.standard.set(renderMode.rawValue,forKey: "viewerRenderMode")
+            onMaterialChanged?()
+        }
+    }
     @Published public var lighting: LightingPreset = .studio { didSet { onMaterialChanged?() } }
     @Published public var rainIntensity: Float = 0.65 { didSet { onMaterialChanged?() } }
     @Published public var wetness: Float = 0.85 { didSet { onMaterialChanged?() } }

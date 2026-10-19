@@ -128,3 +128,12 @@ Under **Source animation**, Cybertruck exposes **Tonneau bed cover** and the leg
 The Cybertruck cover retains all 28 nested slat tracks from `Ego/Cybertruck/Tonneau.tscn`. Its thirty-second source timeline plays in ten seconds, matching the source script's speed-up factor of three. The view-dependent flat cover proxy is omitted in favor of the detailed slats. The legacy Model X uses the source active mesh and brake fixture, replacing the mutually exclusive static variant; its source translation and twenty-degree pitch remain attached to the liftgate. The Palladium/Plaid source has a fixed spoiler, so it does not expose this active-spoiler control.
 
 `python3 tools/validate_accessory_animations.py` compares the viewer's actual component bounds with independently evaluated original APK tracks at closed, partial, open and reverse-scrubbed positions. Pass `--binary /absolute/path/to/TeslaMetalViewer` to check a packaged build. Targeted asset rebuilds use `python3 tools/convert_assets.py --only cybertruck,modelx_legacy` followed by `python3 tools/validate_assets.py --only cybertruck,modelx_legacy`, retaining the rest of the catalog and source audit.
+
+## Rendering modes
+
+Use the **Real-time / Ray traced** switch above the viewport, or the **Rendering** inspector section. Real-time is the initial default; the app remembers your choice. Switching modes preserves the camera, selected model, animation pose and material controls.
+
+- **Real-time** produces a deterministic single-frame preview with adaptive resolution, hard key-light shadows, approximate environment reflections and a light edge filter. It retains glass transmission, source textures, lamps, animations, road/charging/climate effects and weather. It does not wait for progressive samples. Volumetric headlight beams are available in Ray traced mode.
+- **Ray traced** retains the existing progressive renderer with scene reflections, soft shadows, indirect lighting and up to 256 samples. Allow a stationary view to converge for the cleanest result.
+
+Offscreen exports retain Ray traced as their default. Add `--render-mode realtime` for a single-frame preview, or `--render-mode raytraced --samples 128` for progressive quality. `--validate-render-modes` checks actual GPU output, deterministic previews, progressive refinement and mode switching, and reports measured frame times for studio and storm scenes; performance depends on hardware and resolution.

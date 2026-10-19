@@ -29,7 +29,7 @@ public struct ShaderSource {
     // 16-byte aligned Uniforms structure matching Swift UniformsGPU layout exactly
     struct Uniforms {
         float4 effectParams;
-        int4 effectTextures;
+        int4 effectTextures; // road, airflow plane count, noise, real-time mode
         float4x4 climateLeft;
         float4x4 climateRight;
         float4x4 invView;
@@ -482,6 +482,116 @@ public struct ShaderSource {
         return l.ambientColor*(0.75+0.25*max(n.y,0.0));
     }
 
+    static float3 realtimeEnvironment(float3 direction, float rough, float preset) {
+        float3 tangent=normalize(cross(direction,abs(direction.y)<0.98 ? float3(0,1,0) : float3(1,0,0)));
+        float3 bitangent=cross(direction,tangent);
+        float radius=max(0.003,rough*rough*0.55);
+        return sampleEnvironment(direction,preset)*0.4
+            +(sampleEnvironment(normalize(direction+tangent*radius),preset)
+             +sampleEnvironment(normalize(direction-tangent*radius),preset)
+             +sampleEnvironment(normalize(direction+bitangent*radius),preset)
+             +sampleEnvironment(normalize(direction-bitangent*radius),preset))*0.15;
+    }
+
+    // Deterministic single-frame preview: primary visibility and hard key-light
+    // shadows only. Reflections come from the environment; no GI or glossy
+    // secondary scene rays, area-light noise or progressive accumulation.
+    static float3 realtimeRadiance(ray r, typename intersector<triangle_data>::result_type h,
+                                   primitive_acceleration_structure accel, device const Vertex *vertices,
+                                   device const uint *indices, constant GeometryInfo *geometries,
+                                   constant Uniforms &u, array<texture2d<float>,32> textures) {
+        constexpr sampler smp(coord::normalized,address::repeat,filter::linear);
+        float3 result=float3(0), throughput=float3(1);
+        uint paneGroup=0xffffffffu; float paneTransmission=1.0;
+        Lighting light=lightingForPreset(u.renderOptions.x);
+        for (int layer=0;layer<12;++layer) {
+            if (h.type!=intersection_type::triangle)
+                return result+throughput*sampleBackdrop(r.direction,u.renderOptions.x);
+            GeometryInfo m=geometries[h.geometry_id]; applyFinish(m,u);
+            float4 uv; float3 n=hitNormal(h,m,vertices,indices,r.direction,uv);
+            float3 p=r.origin+r.direction*h.distance, v=-r.direction;
+            if (m.params.w>0.01) {
+                bool samePane=m.opticalGroup==paneGroup && h.distance<0.04;
+                float t=paneAttenuation(m,h.distance,u,paneGroup,paneTransmission);
+                float F=0.04+0.96*pow(1.0-max(dot(n,v),0.0),5.0);
+                if ((m.textures.w & 64)!=0) F*=u.renderOptions.w;
+                if (!samePane) {
+                    result+=throughput*F*sampleEnvironment(reflect(r.direction,n),u.renderOptions.x);
+                    throughput*=1.0-F;
+                }
+                throughput*=t;
+                float step=h.distance+0.0004;
+                r.origin+=r.direction*step; r.max_distance-=step; r.min_distance=0.0002;
+                if (r.max_distance<=r.min_distance) return result;
+                h=intersectVisible(r,accel,vertices,indices,geometries,u);
+                continue;
+            }
+            float3 base=m.isPaint==1 ? u.carPaintColor.xyz : m.baseColor.xyz;
+            float metal=m.isPaint==1 ? u.carPaintColor.w : m.baseColor.w;
+            float rough=m.isPaint==1 ? u.params.x : m.params.x;
+            float coat=m.isPaint==1 ? u.params.y : m.params.y;
+            if (m.textures.x>=0) {
+                float4 tex=textures[m.textures.x].sample(smp,(m.textures.w & 16)!=0 ? uv.zw : uv.xy);
+                base*=((m.textures.w & 16)!=0)
+                    ? mix(float3(1),tex.rgb/10.0/max(u.carPaintColor.xyz,float3(0.001)),tex.a)
+                    : pow(max(tex.rgb,0.0),float3(2.2));
+            }
+            if (m.textures.y>=0) {
+                float3 mra=textures[m.textures.y].sample(smp,uv.xy).rgb;
+                metal*=mra.r; rough*=mra.g;
+            }
+            float ao=1.0;
+            if (m.textures.z>=0) {
+                float4 tex=textures[m.textures.z].sample(smp,(m.textures.w & 32)!=0 ? uv.zw : uv.xy);
+                ao=tex[m.textures.w & 3];
+            }
+            if ((m.textures.w & 1048576)!=0) { rough=max(rough,0.82); metal=0.0; }
+            if ((m.textures.w & 128)!=0) { rough=max(rough,0.82); metal=0.0; }
+            float wet=u.renderOptions.x>3.5 ? u.weather.y : 0.0;
+            if (m.isPaint==1) { rough=mix(rough,rough*0.65,wet); coat=max(coat,wet); }
+            if (m.isGround==1) {
+                base=light.groundColor; metal=0.0; rough=u.params.w; coat=u.params.z;
+                if (abs(u.effectParams.y)>0.01 && u.effectTextures.x>=0) {
+                    float laneX=(abs(p.z)-1.8)/0.1+0.5;
+                    if (laneX>=0.0 && laneX<=1.0) {
+                        float offset=clamp(u.effectParams.y,-20.0,60.0)/60.0*1.8*u.effectParams.x;
+                        float2 laneUV=float2(laneX,(p.x/100.0+0.5)*8.0+5.064+offset);
+                        base=mix(base,float3(0.2),textures[u.effectTextures.x].sample(smp,laneUV).a);
+                    }
+                }
+                if (u.renderOptions.x>3.5) {
+                    base*=mix(0.70,1.20,noise2(p.xz*24.0))*(1.0-0.48*wet);
+                    float lane=1.0-smoothstep(0.04,0.065,abs(abs(p.z)-3.3));
+                    float center=(1.0-smoothstep(0.035,0.055,abs(p.z)))*step(0.38,fract(p.x/4.5));
+                    base=mix(base,float3(0.45,0.40,0.24),max(lane,center)*smoothstep(0.2,0.55,noise2(p.xz*42.0))*0.55);
+                    n=wetNormal(p.xz,u.weather.z,wet); coat=max(coat,wet*0.5);
+                }
+            }
+            float3 delta=light.keyPosition-p, l=normalize(delta);
+            float shadow=1.0;
+            if (m.params.z<=0.0) {
+                ray sr; sr.origin=p+n*0.004; sr.direction=l; sr.min_distance=0.003; sr.max_distance=length(delta);
+                shadow=lightVisibility(sr,accel,vertices,indices,geometries,u);
+            }
+            float3 F=fresnelSchlick(max(dot(n,v),0.0),mix(float3(0.04),base,metal));
+            if ((m.textures.w & 1048576)!=0) F*=0.18;
+            if ((m.textures.w & 128)!=0) F*=0.05;
+            float3 env=realtimeEnvironment(reflect(-v,n),rough,u.renderOptions.x);
+            float3 color=directBRDF(n,v,l,base,metal,max(rough,0.08))*light.keyColor*shadow
+                        +base*light.ambientColor*(1.0-metal)*ao+env*F*(1.0-rough*0.65);
+            if (coat>0.02)
+                color+=coat*(env*0.04+directBRDF(n,v,l,float3(0),0.0,max(rough*0.3,0.1))*light.keyColor*shadow);
+            color+=rearPanelLight(p,n,v,base,metal,rough,uint(m.textures.w),u);
+            color+=m.isGround==4 ? base*m.params.z : emittedLight(m,uv,textures,u);
+            if (m.isGround==3) {
+                float flow=pow(max(1.0-fract(u.effectParams.x/1.5-uv.x/1.5),0.0),2.0);
+                color+=float3(0.0,0.35,1.0)*flow;
+            }
+            return result+throughput*color;
+        }
+        return result;
+    }
+
     kernel void raytraceKernel(
         primitive_acceleration_structure accel [[buffer(0)]],
         device const Vertex *vertices [[buffer(1)]],
@@ -525,7 +635,10 @@ public struct ShaderSource {
         constexpr sampler materialSampler(coord::normalized, address::repeat, filter::linear);
         float3 color = sampleBackdrop(rayDir,uniforms.renderOptions.x);
 
-        if (hit.type == intersection_type::triangle) {
+        bool realtime=uniforms.effectTextures.w!=0;
+        if (realtime) {
+            color=realtimeRadiance(primaryRay,hit,accel,vertices,indices,geometries,uniforms,sourceTextures);
+        } else if (hit.type == intersection_type::triangle) {
             uint geomId = hit.geometry_id;
             uint primId = hit.primitive_id;
             GeometryInfo mat = geometries[geomId];
@@ -963,7 +1076,7 @@ public struct ShaderSource {
         // VOLUMETRIC AUTOMOTIVE HEADLIGHT BEAMS & OPTICAL GLARE
         // Dual LED projector lamps with atmospheric scattering & lens flare matching reference
         // ============================================================
-        if (uniforms.weather.w > 0.5) {
+        if (!realtime && uniforms.weather.w > 0.5) {
             float maxRayDist = (hit.type == intersection_type::triangle) ? hit.distance : 40.0;
             float4 beamSources[2]={uniforms.headlampLeft,uniforms.headlampRight};
             float3 beamAxis = normalize(float3(1.0, -0.05, 0.0)); // Downward road projection
@@ -1140,11 +1253,23 @@ public struct ShaderSource {
         float exposure = uniforms.renderOptions.y;
 
         // Subtle lateral chromatic aberration toward the frame edges.
-        float2 caOffset = centered*dot(centered, centered)*0.35;
+        float2 caOffset = uniforms.effectTextures.w!=0 ? float2(0) : centered*dot(centered, centered)*0.35;
         int2 maxP = int2(w-1, h-1);
         int2 pr = clamp(int2(float2(gid) + caOffset*size*0.012), int2(0), maxP);
         int2 pb = clamp(int2(float2(gid) - caOffset*size*0.012), int2(0), maxP);
         float3 hdr = float3(accumTex.read(uint2(pr)).r, accumTex.read(gid).g, accumTex.read(uint2(pb)).b)*exposure;
+
+        if (uniforms.effectTextures.w!=0) {
+            // A light edge filter softens single-frame silhouettes and thin
+            // highlights without waiting for temporal sample convergence.
+            float3 neighbors=float3(0);
+            const int2 offsets[4]={int2(-1,0),int2(1,0),int2(0,-1),int2(0,1)};
+            for (uint i=0u;i<4u;++i)
+                neighbors+=accumTex.read(uint2(clamp(int2(gid)+offsets[i],int2(0),maxP))).rgb;
+            neighbors*=exposure*0.25;
+            float contrast=length(hdr-neighbors)/max(length(hdr)+length(neighbors),0.001);
+            hdr=mix(hdr,neighbors,smoothstep(0.1,0.5,contrast)*0.3);
+        }
 
         // Multi-scale bloom from the bright-pass mip chain.
         float2 texel = 1.0/size;
