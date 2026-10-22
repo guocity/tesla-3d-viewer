@@ -1,6 +1,12 @@
 .DS_Store
 .build/
 __pycache__/
-models/
+/models/
 *.app/
 evidence/
+node_modules/
+.pnpm-store/
+web-viewer/dist/
+.playwright-cli/
+web-viewer/generated/
+site-assets

@@ -1,0 +1,29 @@
+{
+  "retrieved": "2026-10-21",
+  "runtime": "@rive-app/webgl2@2.45.0",
+  "changes": [
+    "hosted.js: local drawer path; hosting telemetry disabled"
+  ],
+  "assets": [
+    {
+      "file": "file.riv",
+      "source": "https://rive-vehicle-interface-i8bka7.uat.rive.to/file.riv",
+      "sha256": "ecc432ef06c7b422f08fbefc957c6530e5cd9571d6e9ee0f24a0e5941a50f90b"
+    },
+    {
+      "file": "drawer.riv",
+      "source": "https://rive-vehicle-interface-i8bka7.uat.rive.to/_player/drawer.riv",
+      "sha256": "0c848dde5e43c057247fde266d1833742cb71f3ba55d2452edf988a209388a2c"
+    },
+    {
+      "file": "hosted.css",
+      "source": "https://rive-vehicle-interface-i8bka7.uat.rive.to/_player/hosted.css",
+      "sha256": "f4a9db2722ca7ee1461171a95e4349d61740101f46d8176689a7dcfb94ab8cd2"
+    },
+    {
+      "file": "hosted.js",
+      "source": "https://rive-vehicle-interface-i8bka7.uat.rive.to/_player/hosted.js",
+      "sha256": "223fbe21e2de68d8366476d2972a2626fda81067be5d2d7fd5eaac21862b086a"
+    }
+  ]
+}

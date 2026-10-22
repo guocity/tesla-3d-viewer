@@ -1,3 +1,5 @@
+import { readAsset } from '../asset-loader.js';
+import { createSourcePlayer } from './source-animation.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -207,7 +209,7 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
   preserveDrawingBuffer: true,
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = state.exposure;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1120,9 +1122,11 @@ async function fetchGltfCached(url, onProgress) {
   if (gltfCache.has(url)) {
     return gltfCache.get(url).clone(true);
   }
-  const gltf = await new Promise((resolve, reject) => {
-    gltfLoader.load(url, resolve, onProgress, reject);
-  });
+  const manifest = await (await fetch('../data/manifest.json')).json();
+  const entry = manifest.files[url];
+  if (!entry) throw new Error(`Missing prepared model: ${url}`);
+  const bytes = await readAsset(new URL(`../data/${entry.file}`, location.href).href, (loaded, total) => onProgress?.({ loaded, total: total || entry.bytes }));
+  const gltf = await gltfLoader.parseAsync(bytes, '');
   gltfCache.set(url, gltf.scene);
   return gltf.scene.clone(true);
 }
@@ -1274,6 +1278,7 @@ async function loadAsset(asset) {
     document.getElementById('sec-wheel-swap').style.opacity = state.wheelPivotNodes.length > 0 ? '1' : '0.45';
 
     setCameraPreset('hero', true);
+    sourcePlayer.bind(root, asset);
     markPathTracerSceneDirty(true);
   } catch (err) {
     console.error('Error loading GLB asset:', err);
@@ -1809,6 +1814,7 @@ function animate(now) {
   }
 
   applyArticulationStep(dt);
+  sourcePlayer.tick(dt);
 
   controls.update();
 
@@ -1845,6 +1851,8 @@ function animate(now) {
   }
 }
 
+const sourcePlayer = createSourcePlayer({ findNode: findNodeByPathOrName, dirty: () => markPathTracerSceneDirty() });
+
 // ============================================================================
 // BOOTSTRAP
 // ============================================================================
@@ -1857,7 +1865,7 @@ async function init() {
   requestAnimationFrame(animate);
 
   try {
-    const resp = await fetch('models/catalog.json');
+    const resp = await fetch('../data/animations/catalog.json');
     state.catalog = await resp.json();
 
     document.getElementById('count-vehicles').textContent = state.catalog.vehicles.length;
@@ -1876,6 +1884,7 @@ async function init() {
 
     // Load Model 3 Performance (5.2 MB) or Cybertruck immediately
     const initialVehicle =
+      state.catalog.vehicles.find(v => v.id === new URLSearchParams(location.search).get('vehicle')) ||
       state.catalog.vehicles.find((v) => v.id === 'model3_high') ||
       state.catalog.vehicles[0];
     if (initialVehicle) {

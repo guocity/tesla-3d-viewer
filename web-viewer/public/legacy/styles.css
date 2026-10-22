@@ -882,3 +882,7 @@ html, body {
 .tree-row:hover {
   background: rgba(255, 255, 255, 0.07);
 }
+.source-transport { position:fixed; z-index:100; bottom:12px; left:50%; transform:translateX(-50%); display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:12px; width:max-content; max-width:94vw; padding:12px; border:1px solid #526070; border-radius:10px; background:#111820ed; color:white; font:13px Inter,sans-serif; }
+.source-transport[hidden] { display:none; }
+.source-transport select,.source-transport button { background:#273341; color:white; padding:6px; border:1px solid #647487; border-radius:4px; }
+.source-transport input[type=range] { width:160px; }

@@ -1,0 +1,269 @@
+:root {
+  color-scheme: light dark;
+  /* The drawer's centre once dragged. A docked drawer uses only the axis
+     along its edge, so it starts in the middle of the bottom. */
+  --drawer-x: 50%;
+  --drawer-y: 50%;
+  --drawer-gap: 8px;
+  /* Clears the iPhone home indicator, which viewport-fit=cover leaves the
+     page to avoid. */
+  --drawer-bottom: env(safe-area-inset-bottom, 0px);
+  --hosted-bg: #1d1d1d;
+  --hosted-fg: #f4f4f4;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--hosted-bg);
+  color: var(--hosted-fg);
+  font:
+    14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+#rive-stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+canvas[data-src] {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The scene draws its own background; until it loads this stays flat. */
+  outline: none;
+}
+
+#rive-status {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+#rive-status[hidden] {
+  display: none;
+}
+
+#rive-status .spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(244, 244, 244, 0.25);
+  border-top-color: var(--hosted-fg);
+  border-radius: 50%;
+  animation: rive-spin 700ms linear infinite;
+}
+
+#rive-status .message {
+  max-width: 32ch;
+  text-align: center;
+  opacity: 0.75;
+}
+
+#rive-status.error .spinner {
+  display: none;
+}
+
+@keyframes rive-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #rive-status .spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* Docked to the bottom by default, or to the left or right edge, or floating,
+   as dragging sets --drawer-x, --drawer-y and data-side. Hidden slides it off
+   its edge, leaving the lip, and .peek brings it back over the lip. The bar is
+   drawn by drawer.riv. Every position is a left and top plus a transform. */
+#rive-drawer {
+  position: fixed;
+  top: calc(100% - var(--drawer-gap) - var(--drawer-bottom));
+  left: var(--drawer-x);
+  line-height: 0;
+  /* Or a touch drag on the grip scrolls the page instead of moving the
+     drawer. */
+  touch-action: none;
+  user-select: none;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+  transform: translate(-50%, -100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#rive-drawer.offstage,
+#rive-drawer.hidden:not(.peek) {
+  transform: translate(-50%, calc(var(--drawer-gap) + var(--drawer-bottom)));
+}
+
+#rive-drawer[data-side='left'] {
+  top: var(--drawer-y);
+  left: var(--drawer-gap);
+  transform: translate(0, -50%);
+}
+
+#rive-drawer[data-side='right'] {
+  top: var(--drawer-y);
+  left: calc(100% - var(--drawer-gap));
+  transform: translate(-100%, -50%);
+}
+
+/* Where it was dropped, away from every edge. */
+#rive-drawer[data-side='float'] {
+  top: var(--drawer-y);
+  transform: translate(-50%, -50%);
+}
+
+#rive-drawer[data-side='left'].offstage,
+#rive-drawer[data-side='left'].hidden:not(.peek) {
+  transform: translate(calc(-100% - var(--drawer-gap)), -50%);
+}
+
+#rive-drawer[data-side='right'].offstage,
+#rive-drawer[data-side='right'].hidden:not(.peek) {
+  transform: translate(var(--drawer-gap), -50%);
+}
+
+#rive-drawer.dragging {
+  transition: none;
+}
+
+#rive-drawer canvas {
+  display: block;
+  cursor: pointer;
+}
+
+#rive-drawer.on-grip canvas {
+  cursor: grab;
+}
+
+#rive-drawer.dragging canvas {
+  cursor: grabbing;
+}
+
+/* Centred over the hovered button; hosted.js sets left from the drawer's
+   tipX. */
+#rive-drawer-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  color: var(--hosted-fg);
+  border: 1px solid rgba(244, 244, 244, 0.1);
+  border-radius: 5px;
+  background: rgba(30, 30, 30, 0.92);
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+#rive-drawer-tip.shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+#rive-drawer.tips-below #rive-drawer-tip {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+/* What a hidden drawer leaves on its edge, where it was. The box is the tap
+   target and the ::before the tab a visitor sees. Gone under a peek, where
+   the bar itself is in its place. */
+#rive-drawer-lip {
+  position: fixed;
+  bottom: var(--drawer-bottom);
+  left: var(--drawer-x);
+  display: none;
+  width: 56px;
+  height: 32px;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+#rive-drawer-lip::before {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(244, 244, 244, 0.5);
+  /* Keeps it visible on a light scene too. */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  transform: translateX(-50%);
+  transition: background-color 120ms ease;
+}
+
+#rive-drawer-lip:hover::before {
+  background: rgba(244, 244, 244, 0.9);
+}
+
+#rive-drawer.hidden:not(.peek) ~ #rive-drawer-lip {
+  display: block;
+}
+
+#rive-drawer[data-side='left'] ~ #rive-drawer-lip,
+#rive-drawer[data-side='right'] ~ #rive-drawer-lip {
+  top: var(--drawer-y);
+  bottom: auto;
+  width: 32px;
+  height: 56px;
+  transform: translateY(-50%);
+}
+
+#rive-drawer[data-side='left'] ~ #rive-drawer-lip {
+  left: 0;
+}
+
+#rive-drawer[data-side='right'] ~ #rive-drawer-lip {
+  right: 0;
+  left: auto;
+}
+
+#rive-drawer[data-side='left'] ~ #rive-drawer-lip::before,
+#rive-drawer[data-side='right'] ~ #rive-drawer-lip::before {
+  top: 50%;
+  bottom: auto;
+  width: 4px;
+  height: 32px;
+  transform: translateY(-50%);
+}
+
+#rive-drawer[data-side='left'] ~ #rive-drawer-lip::before {
+  left: 4px;
+}
+
+#rive-drawer[data-side='right'] ~ #rive-drawer-lip::before {
+  right: 4px;
+  left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #rive-drawer,
+  #rive-drawer-tip {
+    transition: none;
+  }
+}
