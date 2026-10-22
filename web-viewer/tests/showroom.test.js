@@ -7,11 +7,23 @@ import { createVehicleBridge } from '../src/gpu-vehicle-bridge.js';
 test('shared APK headlight material maps to red on rear brake meshes', () => {
   assert.equal(sceneMaterial('headlight__Illumination','Brake_Lights_Left'),'LightRed');
   assert.equal(sceneMaterial('headlight__Illumination','Brake_Lights_Trunk2'),'LightRed');
-  assert.equal(sceneMaterial('headlight__Lights1','Lights_Trunk2'),'LightRed');
-  assert.equal(sceneMaterial('headlight__Illumination','Headlights'),'Light');
+  assert.equal(sceneMaterial('headlight__Lights1','Lights_Trunk2'),'GlassWhite');
+  assert.equal(sceneMaterial('headlight__Illumination','Headlights',false),'Light');
+  assert.equal(sceneMaterial('headlight__Illumination','Headlights',true),'LightRed');
+  assert.equal(sceneMaterial('headlight__Lights1','Lights2',true),'GlassWhite');
+  assert.equal(sceneMaterial('glass_clear__Glass_Lights','Lights_Glass',true),'GlassWhite');
+  assert.equal(sceneMaterial('glass_clear__Glass_Lights','Lights_Glass',false),'GlassWhite');
+  assert.equal(sceneMaterial('interior_white__Suede_Light','Interior_Body',true),'BottomCar');
   assert.equal(sceneMaterial('trim__Light','Brake_Lights_On'),'LightRed');
-  assert.equal(sceneMaterial('trim__Light_Off','Brake_Lights_Off'),'GlassRed');
-  assert.equal(sceneMaterial('headlight__Illumination','Headlights_Trunk'),'MetallicWhite');
+  assert.equal(sceneMaterial('trim__Light_Off','Brake_Lights_Off'),'GlassWhite');
+  assert.equal(sceneMaterial('trim__Lights','Charge_Cap',true),'MetallicBlack02');
+  assert.equal(sceneMaterial('trim__Lights','Charge_Cap_Right',true),'MetallicBlack02');
+  assert.equal(sceneMaterial('trim__Lights','Lights',true),'GlassWhite');
+  assert.equal(sceneMaterial('trim__Light','Brake_Light',true),'LightRed');
+  assert.equal(sceneMaterial('trim__TurnSignalUS_Brakes','Brake_Lights_CHMSL_On',true),'LightRed');
+  assert.equal(sceneMaterial('trim__Light','DRL_Left',false),'Light');
+  assert.equal(sceneMaterial('trim__Light','Headlights_On',false),'Light');
+  assert.equal(sceneMaterial('headlight__Illumination','Headlights_Trunk'),'LightRed');
 });
 test('toggles reverse continuously and independently from their current pose', () => {
   const left = advanceToggle(0,1,0.4,1), trunk = advanceToggle(0,1,0.4,2);

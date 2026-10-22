@@ -38,6 +38,8 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
     // Fit the same display footprint. Preserve each car's proportions.
     const scale = 5.11564 / Math.max(size.z, size.x);
     const quant = [size.x * scale * 1.5 + 0.001, size.y * scale * 2 + 0.001, size.z * scale + 0.001];
+    const rearAxis = size.x > size.z ? 0 : 2;
+    const rearSign = rearAxis === 0 ? -1 : 1;
     const meshes = [];
     root.traverse(mesh => {
       if (!mesh.isMesh || !mesh.visible) return;
@@ -48,7 +50,23 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
       for (const group of groups) {
         const material = materials[group.materialIndex ?? 0];
         if (!material || material.opacity === 0 || group.count === 0) continue;
-        meshes.push({ mesh, geometry, group, name: sceneMaterial(material.name, mesh.name) });
+        // Material names alone cannot distinguish combined front/rear light
+        // meshes. Split their triangle indices, preserving source vertices and
+        // node bindings so doors and liftgates keep their original animation.
+        const buckets = new Map();
+        const point = new Vector3();
+        for (let i = group.start; i < group.start + group.count; i += 3) {
+          const indices = [0, 1, 2].map(j => geometry.index ? geometry.index.getX(i + j) : i + j);
+          let longitudinal = 0;
+          for (const index of indices) longitudinal += point.fromBufferAttribute(geometry.attributes.position, index).applyMatrix4(mesh.matrixWorld).getComponent(rearAxis) / 3;
+          // Imported scene roots can retain a fixed matrix: classify on the
+          // actual world-space long axis, not an assumed applied rotation.
+          const rear = (longitudinal - center.getComponent(rearAxis)) * rearSign > size.getComponent(rearAxis) * 0.2;
+          const name = sceneMaterial(material.name, mesh.name, rear);
+          if (!buckets.has(name)) buckets.set(name, []);
+          buckets.get(name).push(...indices);
+        }
+        for (const [name, indices] of buckets) meshes.push({ mesh, geometry, group: { start: 0, count: indices.length, indices }, name });
       }
     });
     const lengths = meshes.map(({ geometry, group }) => 64 + geometry.attributes.position.count * 20 + group.count * 4);
@@ -93,7 +111,7 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
       for (let i = 0; i < group.count; i += 3) {
         for (let j = 0; j < 3; j++) {
           const index = group.start + i + (reverse && j > 0 ? 3 - j : j);
-          view.setUint32(at, geometry.index ? geometry.index.getX(index) : index, true);
+          view.setUint32(at, group.indices ? group.indices[index] : geometry.index ? geometry.index.getX(index) : index, true);
           at += 4;
         }
       }

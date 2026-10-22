@@ -16,6 +16,10 @@ Vehicle conversion happens during asset preparation rather than in the browser. 
 
 Compressed `.bin` containers are decoded with the browser's DecompressionStream, so they work on ordinary static hosting without server compression configuration. A current browser with WebGL2, WebAssembly and DecompressionStream is required.
 
+## Scene appearance
+
+**Day / Night** in the Tesla bottom bar uses the original Garage state machine’s authored N shortcut, preserving its sky, lighting, reflections, camera and HUD. The mini-player is hidden by setting only its Visor container opacity in the assembled runtime buffer; the source `.riv` stays unchanged. No replacement scene is used. The BMW Panel and Visor UI roots are hidden in the assembled buffer. Tesla top and bottom bars sit above the original scene; vehicle controls and display settings start closed. The appearance command is advanced between key-down and key-up so the Garage script receives it, including after a model reload.
+
 ## Showroom animation switches
 
 Choose a Tesla, then open **Animate vehicle**. Each APK clip is an independent switch: on plays forward and holds the open pose; off plays backward from the current pose and returns closed. Several switches can remain enabled together. There is no play button, slider, clip dropdown or separate animation view.
@@ -24,7 +28,7 @@ The source key times/values and node hierarchy are prepared into small animation
 
 The renderer explicitly starts the `Garage` artboard/state machine. The canvas remains covered by the loading UI until a real environment frame has rendered, so the startup Rive logo/blank intro never appears. Backend watchdog/interlock diagnostics may still be printed by the Rive runtime; they do not themselves indicate that scene startup failed.
 
-Rear brake/tail-light mesh names take precedence over shared APK material names, so they use red lamp materials. Front lamps remain white; parked reverse lamps remain unlit.
+Combined lamp meshes are split by triangle position along each model’s actual world-space long axis. Front emitters retain white materials and rear emitters use red. Charging-port covers and lamp housings are non-emissive; all lamp lens layers, including the trim shells beneath the outer cover, use the scene’s GlassWhite preset (2% tint). The GlassRed preset (35% tint per surface) is excluded from rear lens layers to avoid stacking opaque-looking red sheets. Per-model asset checks verify front/rear colors, charging covers and lens materials.
 
 ## Prepared asset layout
 
