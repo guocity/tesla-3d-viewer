@@ -98,7 +98,9 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
       bytes.set(encoder.encode(name), offset);
       view.setUint32(offset + 36, positions.count, true);
       view.setUint32(offset + 40, group.count, true);
-      // No BMW texture coordinates are reused on a Tesla model.
+      // Preserve the APK cable flow coordinate in spare color channels.
+      // It stays independent of the showroom material texture transforms.
+      const flowUV = mesh.userData.effect === 'chargeFlow' ? geometry.attributes.uv : null;
       let at = offset + 64;
       for (let i = 0; i < positions.count; i++, at += 20) {
         p.fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld);
@@ -109,6 +111,10 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
         view.setInt16(at + 8, oct[0], true);
         view.setInt16(at + 10, oct[1], true);
         bytes.set([255, 255, 255, 255], at + 16);
+        if (flowUV) {
+          bytes[at + 17] = Math.round(Math.max(0, Math.min(1, flowUV.getX(i))) * 255);
+          bytes[at + 18] = 0;
+        }
       }
       const reverse = mesh.matrixWorld.determinant() < 0;
       for (let i = 0; i < group.count; i += 3) {

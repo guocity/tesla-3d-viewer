@@ -112,6 +112,7 @@ export function createShowroomAnimation(bridge, panel) {
     if (chargeManaged && !charging && connection === 0) {
       for (const c of ports) if (c.target !== 0) setTarget(c, 0);
     }
+    bridge.setChargingFlow?.(charging && connection > 0);
     if(clips.some(c=>c.blink && c.target))dirty=true;
     if(dirty){apply();dirty=false;}
   }
@@ -141,6 +142,13 @@ export function createShowroomAnimation(bridge, panel) {
         const clip={tracks,duration:source.duration||1,current:initial,target:initial,button,alwaysApply:Boolean(source.alwaysApply),exclusiveGroup:source.exclusiveGroup,blink:source.blink};button.onclick=()=>setTarget(clip,clip.target?0:1);clips.push(clip);
       }
     },
+    getChargePortPoint() {
+      const index = cableNodes[0];
+      if (index === undefined || !normalization) return null;
+      const point = new Vector3().setFromMatrixPosition(nodes[index].world).applyMatrix4(normalization);
+      point.chargeSide = Math.sign(new Vector3(0,0,-1).transformDirection(nodes[index].world).x) || -1;
+      return point;
+    },
     getChargingState() {
       const ports = clips.filter(c => /^chargeport(?:global)?animation$/i.test(c.button.dataset.clip));
       return { portOpen: ports.length ? Math.min(...ports.map(c=>c.current)) : 1, connection, opacity:chargingOpacity(connection), hasCable: cableNodes.length>0 };
@@ -156,7 +164,7 @@ export function createShowroomAnimation(bridge, panel) {
       ports.forEach(c => setTarget(c, Number(open)));
       return ports.length > 0;
     },
-    stop(){charging=false;connection=0;chargeManaged=false;clips.forEach(c=>{c.current=0;c.target=0;});bridge.reset();},
+    stop(){charging=false;connection=0;chargeManaged=false;bridge.setChargingFlow?.(false);clips.forEach(c=>{c.current=0;c.target=0;});bridge.reset();},
     dispose(){cancelAnimationFrame(frame);},
   };
 }

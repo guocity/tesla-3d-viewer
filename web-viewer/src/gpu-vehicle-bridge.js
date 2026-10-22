@@ -1,3 +1,5 @@
+import { createSceneCamera, patchSceneCameraShader } from './scene-camera.js';
+import { createChargingFlow, patchChargingFlowShader } from './charging-flow.js';
 import { createAdScreen } from './ad-screen.js';
 import { patchChargingFadeShader } from './charging-fade.js';
 // Pinned Rive WebGL2 adapter. Match complete packed mesh signatures before
@@ -5,6 +7,8 @@ import { patchChargingFadeShader } from './charging-fade.js';
 export function createVehicleBridge(canvas) {
   const ads = typeof Image === "undefined" ? null : createAdScreen();
   const contexts = new WeakSet();
+  const chargingFlow = createChargingFlow();
+  const camera = createSceneCamera(canvas);
   let parts = [], matched = new Map(), reveal, lastProbe = 0;
   function probe(gl) {
     if (!reveal || performance.now() - lastProbe < 100 || !gl.drawingBufferWidth) return;
@@ -28,17 +32,18 @@ export function createVehicleBridge(canvas) {
     contexts.add(gl);
     if (gl.shaderSource) {
       const shaderSource = gl.shaderSource;
-      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchChargingFadeShader(ads?.patchShader(source) ?? source)); };
+      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchSceneCameraShader(patchChargingFlowShader(patchChargingFadeShader(ads?.patchShader(source) ?? source)))); };
     }
     for (const method of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced','drawRangeElements','blitFramebuffer','flush']) {
       const originalDraw = gl[method];
       if (!originalDraw) continue;
-      gl[method] = function (...args) { const restore = ads?.beforeDraw(gl);
+      gl[method] = function (...args) { const restore = ads?.beforeDraw(gl); chargingFlow.beforeDraw(gl); camera.beforeDraw(gl);
         let result; try { result = originalDraw.apply(gl,args); } finally { restore?.(); }
         probe(gl); return result; };
     }
     const original = gl.bufferSubData;
     gl.bufferSubData = function (target, destination, source, sourceOffset = 0, length) {
+      camera.observeUpload(gl,target,destination,source,sourceOffset,length);
       if (target === gl.COPY_WRITE_BUFFER && ArrayBuffer.isView(source) && parts.length) {
         const unit = source.BYTES_PER_ELEMENT;
         const count = (length ?? source.length - sourceOffset) * unit;
@@ -56,7 +61,12 @@ export function createVehicleBridge(canvas) {
     return gl;
   };
   return {
+    setChargingFlow: chargingFlow.setActive,
+    get camera() { return camera.current; },
+    focusChargePort: camera.focus,
+    cancelCameraTransition: camera.cancel,
     setVehicle(packed) {
+      chargingFlow.setActive(false); camera.reset();
       matched = new Map(); parts = [];
       const view = new DataView(packed), bytes = new Uint8Array(packed);
       let at = 112;
@@ -83,6 +93,6 @@ export function createVehicleBridge(canvas) {
       return true;
     },
     reset() { for (const part of parts) { part.current.set(part.rest); this.upload(part); } },
-    clear() { parts = []; matched.clear(); },
+    clear() { chargingFlow.setActive(false); parts = []; matched.clear(); },
   };
 }

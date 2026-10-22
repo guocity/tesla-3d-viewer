@@ -88,3 +88,7 @@ physical iOS/Android browser checks are separate.
 Cybertruck's four Premium aero wheel covers use the matte `BottomCar` material
 preset, rather than the reflective metal rim preset. Other wheel finishes keep
 their existing material mapping.
+
+## Charging and orbit controls
+
+Charging opens the source port and fades in the APK cable. A smooth green pulse travels from the cable end toward the handle using the original UV direction and 1.5-second timing. The port view transitions once, then leaves mouse and touch rotation free; input also interrupts an active transition. Mouse wheel and two-finger pinch zoom are supported. Wide framing keeps the physical camera on the showroom platform. The connected charge button docks away from the port without a tooltip. Browser regressions verify actual camera-position changes during charging rather than only checking that drag events arrive.

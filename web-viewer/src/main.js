@@ -30,6 +30,7 @@ const mode = panel.querySelector('#animation-mode');
 const quality = panel.querySelector('#quality');
 const status = document.getElementById('rive-status');
 const canvas = document.querySelector('#rive-stage canvas');
+canvas.tabIndex = -1;
 let instance, manifest, shellPromise, token = 0;
 const bridge = createVehicleBridge(canvas);
 let animationController, animationModule, currentParts, currentRig;
@@ -99,6 +100,7 @@ async function showVehicle() {
   const load = { buffer, artboard: 'Garage', stateMachine: 'Garage', autoplay: true, autoBind: true, enableGPUCanvas: true };
   if (instance) instance.load(load);
   else instance = new rive.Rive({ ...load, canvas, enableMultiTouch: true,
+    focusOptions: { allowFocusInterrupt: true },
     layout: new rive.Layout({ fit: 'layout', alignment: 'center' }),
     onLoad: () => {
       const vm = instance.viewModelInstance;
@@ -170,6 +172,7 @@ const chrome = createTeslaChrome({
 panel.querySelector('label[for=quality]')?.remove();
 
 const charging = createChargingControl({
+  bridge, getPortPoint: () => animationController?.getChargePortPoint(),
   canvas, getInstance: () => instance,
   getAnimations: async () => { await ensureAnimations(); return animationController; },
 });

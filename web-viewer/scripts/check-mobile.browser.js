@@ -23,7 +23,7 @@ async page => {
 
     async function swipe(x,y,dx,dy) {
       await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
-      for(let step=1;step<=10;step++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+dx*step/10,y:y+dy*step/10}]});
+      for(let step=1;step<=10;step++){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+dx*step/10,y:y+dy*step/10}]});await mobile.waitForTimeout(25);}
       await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
     }
     async function bounds(selector) {
@@ -65,19 +65,20 @@ async page => {
     const hotspot=mobile.locator('.tesla-charge-hotspot');
     await tap(hotspot);
     await mobile.waitForFunction(()=>document.querySelector('.tesla-charge-hotspot').dataset.connection==='1.000',null,{timeout:15000});
-    await mobile.evaluate(()=>{
-      window.__touchEvents=[];
-      for(const type of ['mousedown','mousemove','mouseup','touchstart','touchmove','touchend'])document.querySelector('#rive-stage canvas').addEventListener(type,e=>window.__touchEvents.push(e.type));
-    });
+    await mobile.waitForFunction(()=>document.querySelector('.tesla-charge-hotspot').dataset.view==='charge-port');
+    const eye=async()=>JSON.parse(await hotspot.getAttribute('data-camera-eye'));
+    const moved=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]))>.3;
+    let before=await eye();
+    await mobile.screenshot({path:'evidence/mobile-charging-full-cable.png',scale:'css'});
     const b=await hotspot.boundingBox(),x=b.x+b.width/2,y=b.y+b.height/2;
     await swipe(x,y,x>195?-100:100,-30);
-    const events=await mobile.evaluate(()=>window.__touchEvents);
-    if(!['mousedown','mousemove','mouseup'].every(t=>events.includes(t)))throw Error('Charger drag did not reach the car rotation handler');
+    await mobile.waitForTimeout(150);
+    if(!moved(before,await eye()))throw Error('Charger touch drag did not rotate the car');
     if(await hotspot.getAttribute('aria-pressed')!=='true')throw Error('Touch drag toggled charging');
-    await mobile.evaluate(()=>window.__touchEvents=[]);
+    before=await eye();
     await swipe(160,400,70,-30);
-    const direct=await mobile.evaluate(()=>window.__touchEvents);
-    if(!['touchstart','touchmove','touchend'].every(t=>direct.includes(t)))throw Error('Native canvas touch rotation failed');
+    await mobile.waitForTimeout(150);
+    if(!moved(before,await eye()))throw Error('Native canvas touch drag did not rotate the car');
     await tap(hotspot);
     await mobile.waitForFunction(()=>{const d=document.querySelector('.tesla-charge-hotspot').dataset;return d.connection==='0.000'&&d.portOpen==='0.000';},null,{timeout:15000});
     await mobile.screenshot({path:'evidence/mobile-phone-verified.png',scale:'css'});
