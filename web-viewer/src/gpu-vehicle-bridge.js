@@ -1,7 +1,9 @@
+import { createAdScreen } from './ad-screen.js';
 import { patchChargingFadeShader } from './charging-fade.js';
 // Pinned Rive WebGL2 adapter. Match complete packed mesh signatures before
 // retaining a buffer; unrelated UI, index and uniform uploads are never modified.
 export function createVehicleBridge(canvas) {
+  const ads = typeof Image === "undefined" ? null : createAdScreen();
   const contexts = new WeakSet();
   let parts = [], matched = new Map(), reveal, lastProbe = 0;
   function probe(gl) {
@@ -26,12 +28,14 @@ export function createVehicleBridge(canvas) {
     contexts.add(gl);
     if (gl.shaderSource) {
       const shaderSource = gl.shaderSource;
-      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchChargingFadeShader(source)); };
+      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchChargingFadeShader(ads?.patchShader(source) ?? source)); };
     }
     for (const method of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced','drawRangeElements','blitFramebuffer','flush']) {
       const originalDraw = gl[method];
       if (!originalDraw) continue;
-      gl[method] = function (...args) { const result = originalDraw.apply(gl,args); probe(gl); return result; };
+      gl[method] = function (...args) { const restore = ads?.beforeDraw(gl);
+        let result; try { result = originalDraw.apply(gl,args); } finally { restore?.(); }
+        probe(gl); return result; };
     }
     const original = gl.bufferSubData;
     gl.bufferSubData = function (target, destination, source, sourceOffset = 0, length) {

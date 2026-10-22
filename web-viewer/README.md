@@ -68,3 +68,7 @@ Vehicle picker thumbnails use locally bundled studio/stock images; source URLs a
 Cybertruck charging retains the source scalar Bezier rotation channels and their time/value handles. Its `Spatials/ChargeportMarker` supplies the charging cable anchor when the older `ChargePort` node is absent.
 
 For the live viewer regression check, start `npm run dev`, open its URL with `playwright-cli -s=viewer-check open <url>`, then run `playwright-cli -s=viewer-check run-code "$(cat scripts/check-viewer.browser.js)"`. This checks scene-authored day/night commands across HTML focus changes and vehicle reloads, Cybertruck charging/disconnect, default-off roof bar, and all twelve studio images. Run `python3 tools/test_charging_export.py` from the repository root for the exporter regression.
+
+Drags beginning on the charging plug are forwarded to the showroom camera for both mouse and touch; a tap still operates the charger. Cybertruck rear lighting has three red running segments (center plus the upper left/right fixtures), exclusive of the separate lower brake sections. Front square covers are clear with round internal projectors; turn emitters default off.
+
+`ads/lgnat.jpg` supplies the monitor's first ad (black LGNAT.COM on white). The existing LED monitor alternates the ad with its original color program, retaining perspective, occlusion, reflections and lighting.

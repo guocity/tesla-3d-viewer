@@ -1,5 +1,6 @@
+import { teslaIcon } from './tesla-icons.js';
 export function createTeslaChrome({ panel, controls, appearance, quality, setTemperature, setFan, setDefrost }) {
-  const brand = document.createElement('span'); brand.className = 'tesla-brand'; brand.textContent = 'T E S L A';
+  const brand = document.createElement('span'); brand.className = 'tesla-brand'; brand.innerHTML = teslaIcon('wordmark',104);brand.setAttribute('aria-label','Tesla');
   panel.prepend(brand); panel.setAttribute('aria-label', 'Tesla vehicle status');
   const status = document.createElement('div'); status.className = 'tesla-top-status';
   status.innerHTML = '<span class="tesla-park">P <small>Parked</small></span><time></time><span class="tesla-battery" aria-label="Battery 80 percent">▰ <span>80%</span></span>';
@@ -12,6 +13,9 @@ export function createTeslaChrome({ panel, controls, appearance, quality, setTem
   bar.querySelector('.tesla-controls-slot').append(controls);
   controls.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 15 1-5 3-4h8l3 4 1 5v4h-3v-2H7v2H4v-4Zm2-5h12M4 14h3m10 0h3"/></svg><span>Controls</span>';
   bar.append(appearance); document.body.append(bar);
+  bar.querySelector('[data-fan]').innerHTML = teslaIcon('fan');
+  bar.querySelector('[data-defrost]').innerHTML = teslaIcon('defrost');
+  controls.innerHTML = `${teslaIcon('controls',36)}<span>Controls</span>`;
   let temperature = 21.5, fan = false, defrost = false;
   const changeTemperature = delta => { temperature = Math.min(28, Math.max(16, temperature + delta)); bar.querySelector('[data-temperature]').textContent = `${temperature.toFixed(1)}°`; setTemperature(temperature); };
   bar.querySelector('[data-cool]').onclick = () => changeTemperature(-.5);

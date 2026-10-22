@@ -1,4 +1,6 @@
-const plug = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v5m8-5v5M6 7h12v4a6 6 0 0 1-5 5.9V22h-2v-5.1A6 6 0 0 1 6 11V7Z"/></svg>';
+import { teslaIcon } from './tesla-icons.js';
+import { bindChargeGesture } from './charge-gesture.js';
+const plug = teslaIcon('charging',24);
 
 export function createChargingControl({ canvas, getInstance, getAnimations }) {
   const button = document.createElement('button'); button.type = 'button'; button.className = 'tesla-charge-hotspot';
@@ -36,7 +38,8 @@ export function createChargingControl({ canvas, getInstance, getAnimations }) {
       showInfo(connected);
     } finally { busy = false; button.disabled = false; }
   }
-  button.onclick = () => { toggle().catch(error => { info.hidden=false; info.textContent=error.message; }); };
+  const gesture = bindChargeGesture(button, canvas);
+  button.onclick = event => { if (gesture.consumeClick(event)) { event.preventDefault(); return; } toggle().catch(error => { info.hidden=false; info.textContent=error.message; }); };
   function position() {
     const instance = getInstance();
     if (instance?.loaded && document.getElementById('rive-stage').dataset.ready === 'true') {
@@ -44,8 +47,10 @@ export function createChargingControl({ canvas, getInstance, getAnimations }) {
       const width = instance.artboard.width, height = instance.artboard.height;
       const x = vm.number('pin2x').value / width * rect.width + rect.left;
       const y = vm.number('pin2y').value / height * rect.height + rect.top;
-      button.style.left = `${Math.max(30, Math.min(innerWidth - 30, x))}px`;
-      button.style.top = `${Math.max(100, Math.min(innerHeight - 110, y))}px`;
+      if (!gesture.dragging) {
+        button.style.left = `${Math.max(30, Math.min(innerWidth - 30, x))}px`;
+        button.style.top = `${Math.max(100, Math.min(innerHeight - 110, y))}px`;
+      }
       button.hidden = false;
       if (animations) {
         const state = animations.getChargingState();
@@ -60,6 +65,6 @@ export function createChargingControl({ canvas, getInstance, getAnimations }) {
   }
   requestAnimationFrame(position);
   return {
-    reset() { generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); button.querySelector('.charge-tooltip').textContent='Start charging'; document.documentElement.dataset.charging='false'; },
+    reset() { gesture.reset(); generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); button.querySelector('.charge-tooltip').textContent='Start charging'; document.documentElement.dataset.charging='false'; },
   };
 }

@@ -1,3 +1,4 @@
+import { cybertruckLampClips } from './cybertruck-lighting.js';
 import { chargingOpacity } from './charging-fade.js';
 import { Matrix4, Matrix3, Vector3, Quaternion, Euler } from 'three';
 import { sampleTrack } from '../public/legacy/source-animation.js';
@@ -7,7 +8,7 @@ export function advanceToggle(current, target, elapsedSeconds, duration) {
   return target > current ? Math.min(target, current + step) : Math.max(target, current - step);
 }
 
-const labels = { RoofLightbarAnimation:'Roof light bar', LRDoorAnimationComplete:'Rear left falcon door', RRDoorAnimationComplete:'Rear right falcon door', LRDoorAnimationTop:'Rear left upper hinge', RRDoorAnimationTop:'Rear right upper hinge', LRDoorAnimationBottom:'Rear left lower hinge', RRDoorAnimationBottom:'Rear right lower hinge', LRDoorSensorAnimation:'Rear left door sensor', RRDoorSensorAnimation:'Rear right door sensor', RoofSensorAnimation:'Roof sensor', SpoilerAnimation:'Spoiler', SuspensionAnimation:'Suspension', ChargeportGlobalAnimation:'Charge port assembly', Jumper_Seat_Animation:'Jump seat', Jumper_Seat_Armrests_Animation:'Jump seat armrests', HoodAnimation:'Frunk', TrunkAnimation:'Trunk / liftgate', LFDoorAnimation:'Front left door', RFDoorAnimation:'Front right door', LRDoorAnimation:'Rear left door', RRDoorAnimation:'Rear right door', LFDoorMirrorAnimation:'Left mirror', RFDoorMirrorAnimation:'Right mirror', LFWindowAnimation:'Front left window', RFWindowAnimation:'Front right window', LRWindowAnimation:'Rear left window', RRWindowAnimation:'Rear right window', ChargeportAnimation:'Charge port', ChargePortAnimation:'Charge port', TonneauAnimation:'Tonneau cover' };
+const labels = { LeftSignalAnimation:'Left turn signal', RightSignalAnimation:'Right turn signal', DRLAnimation:'DRL', BrakeLightsAnimation:'Brake lights', RoofLightbarAnimation:'Roof light bar', LRDoorAnimationComplete:'Rear left falcon door', RRDoorAnimationComplete:'Rear right falcon door', LRDoorAnimationTop:'Rear left upper hinge', RRDoorAnimationTop:'Rear right upper hinge', LRDoorAnimationBottom:'Rear left lower hinge', RRDoorAnimationBottom:'Rear right lower hinge', LRDoorSensorAnimation:'Rear left door sensor', RRDoorSensorAnimation:'Rear right door sensor', RoofSensorAnimation:'Roof sensor', SpoilerAnimation:'Spoiler', SuspensionAnimation:'Suspension', ChargeportGlobalAnimation:'Charge port assembly', Jumper_Seat_Animation:'Jump seat', Jumper_Seat_Armrests_Animation:'Jump seat armrests', HoodAnimation:'Frunk', TrunkAnimation:'Trunk / liftgate', LFDoorAnimation:'Front left door', RFDoorAnimation:'Front right door', LRDoorAnimation:'Rear left door', RRDoorAnimation:'Rear right door', LFDoorMirrorAnimation:'Left mirror', RFDoorMirrorAnimation:'Right mirror', LFWindowAnimation:'Front left window', RFWindowAnimation:'Front right window', LRWindowAnimation:'Rear left window', RRWindowAnimation:'Rear right window', ChargeportAnimation:'Charge port', ChargePortAnimation:'Charge port', TonneauAnimation:'Tonneau cover' };
 export function advanceCharging(current, connected, portOpen, elapsed) {
   return advanceToggle(current, connected && portOpen >= .98 ? 1 : 0, elapsed, .8);
 }
@@ -32,7 +33,7 @@ export function createShowroomAnimation(bridge, panel) {
     for (const clip of clips) {
       if (clip.current <= 0 && !clip.alwaysApply) continue;
       for (const { node, track, property } of clip.tracks) {
-        const n = nodes[node], value = sampleTrack(track, clip.current * clip.duration);
+        const n = nodes[node], value = sampleTrack(track, (clip.blink && Math.floor(last / 450) % 2 ? 0 : clip.current) * clip.duration);
         if (value == null) continue;
         if (track.type === 'transform') { n.p.copy(value.position); n.q.copy(value.quaternion); n.s.copy(value.scale); }
         else if (property === 'rotation_degrees') { euler.set(...value.map(v=>v*Math.PI/180),'YXZ'); n.q.setFromEuler(euler); }
@@ -86,7 +87,17 @@ export function createShowroomAnimation(bridge, panel) {
     for(const[part,r]of ranges)bridge.upload(part,r.first,r.end-r.first);
     panel.dataset.active=String(clips.filter(c=>c.current>0).length);
   }
-  function setTarget(clip, target) { clip.target=target;clip.button.setAttribute('aria-checked',String(Boolean(target)));dirty=true; }
+  function setTarget(clip, target) {
+    if (clip.exclusiveGroup) {
+      // Switch emitters together: cross-fading these overlapping strips would
+      // briefly show both running and brake lights again.
+      for (const other of clips.filter(c=>c.exclusiveGroup===clip.exclusiveGroup)) {
+        other.current=other.target=other===clip?target:1-target;
+        other.button.setAttribute('aria-checked',String(Boolean(other.target)));
+      }
+    } else { clip.target=target;if(clip.blink)clip.current=target;clip.button.setAttribute('aria-checked',String(Boolean(target))); }
+    dirty=true;
+  }
   panel.querySelector('[data-close]').onclick=()=>{panel.hidden=true;};
   function tick(now){
     frame=requestAnimationFrame(tick);if(!last)last=now;const elapsed=now-last;if(elapsed<1000/24)return;last=now;
@@ -101,6 +112,7 @@ export function createShowroomAnimation(bridge, panel) {
     if (chargeManaged && !charging && connection === 0) {
       for (const c of ports) if (c.target !== 0) setTarget(c, 0);
     }
+    if(clips.some(c=>c.blink && c.target))dirty=true;
     if(dirty){apply();dirty=false;}
   }
   frame=requestAnimationFrame(tick);
@@ -118,13 +130,15 @@ export function createShowroomAnimation(bridge, panel) {
         target: 'Roof_Lightbar:scale', type: 'value', interpolation: 1,
         times: [0, .6], values: [[0, 0, 0], roofBar.restS.toArray()],
       }] }] : [];
-      for(const source of [...(rig.animations || []), ...roofAnimation]){
+      for(const source of [...(rig.animations || []), ...roofAnimation, ...cybertruckLampClips(nodes)]){
         const tracks=(source.tracks||[]).map(track=>{const [path, ...property] = track.target.split(':');return{node:resolve(path),property:property.length?property.join(':'):'transform',track};}).filter(t=>t.node!==undefined);
         if(!tracks.length)continue;
         const button=document.createElement('button');button.type='button';button.className='motion-switch';button.setAttribute('role','switch');button.setAttribute('aria-checked','false');button.dataset.clip=source.name;
         const label=document.createElement('span');label.textContent=labels[source.name]||source.name.replace(/Animation$/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
-        button.append(label);list.append(button);
-        const clip={tracks,duration:source.duration||1,current:0,target:0,button,alwaysApply:Boolean(source.alwaysApply)};button.onclick=()=>setTarget(clip,clip.target?0:1);clips.push(clip);
+        button.append(label);if(!source.hiddenControl)list.append(button);
+        const initial=Number(Boolean(source.defaultOn));
+        button.setAttribute('aria-checked',String(Boolean(initial)));
+        const clip={tracks,duration:source.duration||1,current:initial,target:initial,button,alwaysApply:Boolean(source.alwaysApply),exclusiveGroup:source.exclusiveGroup,blink:source.blink};button.onclick=()=>setTarget(clip,clip.target?0:1);clips.push(clip);
       }
     },
     getChargingState() {

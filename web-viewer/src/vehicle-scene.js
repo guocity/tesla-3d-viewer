@@ -1,3 +1,4 @@
+import { splitCybertruckRearLamps, correctCybertruckFrontLamps } from './cybertruck-optics.js';
 import { Box3, Matrix3, Matrix4, Vector3 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -24,6 +25,8 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
   const gltf = url instanceof ArrayBuffer ? await loader.parseAsync(url, '') : await loader.loadAsync(url);
   const root = gltf.scene;
   try {
+    splitCybertruckRearLamps(root);
+    correctCybertruckFrontLamps(root);
     root.updateMatrixWorld(true);
     let box = new Box3().setFromObject(root);
     let size = box.getSize(new Vector3());

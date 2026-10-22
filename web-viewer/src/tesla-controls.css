@@ -32,3 +32,7 @@
 @keyframes plug-glow { 0%,100% { opacity:.5; }50% { opacity:1; } }
 .scene-appearance:disabled { opacity:.45; cursor:wait; }
 @media(prefers-reduced-motion:reduce) { .tesla-charge-progress { transition:none; }.charging-symbol,.tesla-charge-hotspot[aria-pressed=true] svg { animation:none; } }
+
+.tesla-charge-hotspot { touch-action:none; user-select:none; -webkit-user-select:none; }
+
+.tesla-reference-icon { display:inline-block; flex-shrink:0; background:currentColor; vertical-align:middle; pointer-events:none; }

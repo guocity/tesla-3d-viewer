@@ -9,6 +9,7 @@ export function sceneMaterial(materialName, nodeName = '', rear = false) {
   // Clear lamp covers use the scene's transparent clear-glass material.
   // Keep this separate from tinted cabin glazing and emissive lamp geometry.
   if (/charge[_ .-]*(?:cap|port)|chargeport/.test(part) && lamp) return 'MetallicBlack02';
+  if (name === 'headlight__lights1') return 'GlassWhite';
   if (/^glass(?:_clear)?__glass_lights/.test(name)) return 'GlassWhite';
   if (lamp && (rear || rearName)) {
     const emitter = /illumination/.test(name) || /^trim__turnsignal.*brakes/.test(name) || /^trim__light$/.test(name) && /brake|(?:lights?|signal).*on|parking_lights/.test(part);
