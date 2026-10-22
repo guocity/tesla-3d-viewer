@@ -1,6 +1,5 @@
 import { createChargeCamera } from './charging-camera.js';
 import { teslaIcon } from './tesla-icons.js';
-import { bindChargeGesture } from './charge-gesture.js';
 const plug = teslaIcon('charging',24);
 
 export function createChargingControl({ canvas, bridge, getPortPoint, getInstance, getAnimations }) {
@@ -10,8 +9,9 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
   button.hidden = true;
   const info = document.createElement('div'); info.className = 'tesla-charge-progress'; info.hidden = true;
   info.setAttribute('role','status'); info.innerHTML = `<span class="charging-symbol">${plug}</span><div><strong>Charging</strong><span>Click the plug to disconnect</span></div>`;
-  document.body.append(button, info);
-  const header=document.querySelector('.vehicle-selector'), toolbar=document.querySelector('.tesla-bottom');
+  const toolbar = document.querySelector('.tesla-bottom');
+  toolbar.querySelector('.tesla-controls-slot').after(button);
+  document.body.append(info);
   let connected = false, busy = false, generation = 0, animations, fadeTimer;
   function showInfo(visible) {
     clearTimeout(fadeTimer);
@@ -45,24 +45,11 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
       }
     } finally { busy = false; button.disabled = false; }
   }
-  const gesture = bindChargeGesture(button, canvas);
-  button.onclick = event => { if (gesture.consumeClick(event)) { event.preventDefault(); return; } toggle().catch(error => { info.hidden=false; info.textContent=error.message; }); };
+  button.onclick = () => { toggle().catch(error => { info.hidden=false; info.textContent=error.message; }); };
   function position() {
     const instance = getInstance();
     if (instance?.loaded && document.getElementById('rive-stage').dataset.ready === 'true') {
-      const vm = instance.viewModelInstance, rect = canvas.getBoundingClientRect();
       if(bridge.camera){button.dataset.cameraEye=JSON.stringify(bridge.camera.eye.toArray());button.dataset.cameraZoom=String(bridge.camera.zoom??bridge.camera.eye.length());}
-      const width = instance.artboard.width, height = instance.artboard.height;
-      const point=getPortPoint();
-      const projected=point&&bridge.camera ? point.clone().applyMatrix4(bridge.camera.mvp) : null;
-      const x = projected ? (projected.x*.5+.5)*rect.width+rect.left : vm.number('pin2x').value / width * rect.width + rect.left;
-      const y = projected ? (.5-projected.y*.5)*rect.height+rect.top : vm.number('pin2y').value / height * rect.height + rect.top;
-      if (!gesture.dragging) {
-        button.style.left = `${connected ? innerWidth - 42 : Math.max(30, Math.min(innerWidth - 30, x - 48))}px`;
-        const top=(header?.getBoundingClientRect().bottom ?? 76)+24;
-        const bottom=(toolbar?.getBoundingClientRect().top ?? innerHeight-82)-24;
-        button.style.top = `${connected ? bottom - 18 : Math.max(top, Math.min(bottom, y))}px`;
-      }
       button.hidden = false;
       if (animations) {
         const state = animations.getChargingState();
@@ -78,6 +65,6 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
   }
   requestAnimationFrame(position);
   return {
-    reset() { cameraControl.cancel(); gesture.reset(); generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); document.documentElement.dataset.charging='false'; },
+    reset() { cameraControl.cancel(); generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); document.documentElement.dataset.charging='false'; },
   };
 }

@@ -37,7 +37,7 @@ async page => {
       await mobile.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       await bounds('.vehicle-selector,.tesla-bottom,.tesla-bottom button,.model-trigger');
       const bar=await mobile.locator('.tesla-bottom button').evaluateAll(buttons=>buttons.filter(b=>b.getBoundingClientRect().width>0).map(b=>({label:b.getAttribute('aria-label'),r:b.getBoundingClientRect().toJSON()})));
-      if(bar.length!==3)throw Error(`Expected one row of three functional mobile buttons, got ${bar.length}`);
+      if(bar.length!==4)throw Error(`Expected one row of four functional mobile buttons, got ${bar.length}`);
       if(bar.some(b=>b.r.height<44||b.r.width<44)||Math.max(...bar.map(b=>b.r.y+b.r.height/2))-Math.min(...bar.map(b=>b.r.y+b.r.height/2))>2)throw Error(`Mobile toolbar ${width}x${height}: ${JSON.stringify(bar)}`);
       await tap(mobile.locator('.model-trigger'));
       await bounds('.model-menu');
@@ -52,8 +52,10 @@ async page => {
       if(await mobile.locator('[data-clip="RoofLightbarAnimation"]').getAttribute('aria-checked')!=='true')throw Error('Mobile vehicle switch failed');
       await tap(mobile.locator('[data-clip="RoofLightbarAnimation"]'));
       await tap(mobile.locator('.showroom-motion [data-close]'));
-      await tap(mobile.locator('[data-settings]'));await bounds('.tesla-display-settings');
-      await tap(mobile.locator('[data-settings]'));
+      const quality=mobile.locator('[data-settings]'), previous=await quality.textContent();
+      await tap(quality);
+      if(await quality.textContent()===previous||await mobile.locator('.tesla-display-settings').count())throw Error('Quality must toggle directly without a popup');
+      await tap(quality);
       results.push(`${width}x${height}: layout, one-row toolbar, touch menus, no keyboard, scroll, controls`);
     }
     await viewport(390,844);
@@ -68,11 +70,6 @@ async page => {
     const moved=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]))>.3;
     let before=await eye();
     await mobile.screenshot({path:'evidence/mobile-charging-full-cable.png',scale:'css'});
-    const b=await hotspot.boundingBox(),x=b.x+b.width/2,y=b.y+b.height/2;
-    await swipe(x,y,x>195?-100:100,-30);
-    await mobile.waitForTimeout(150);
-    if(!moved(before,await eye()))throw Error('Charger touch drag did not rotate the car');
-    if(await hotspot.getAttribute('aria-pressed')!=='true')throw Error('Touch drag toggled charging');
     before=await eye();
     await swipe(160,400,70,-30);
     await mobile.waitForTimeout(150);
@@ -82,7 +79,7 @@ async page => {
     await mobile.screenshot({path:'evidence/mobile-phone-verified.png',scale:'css'});
     await tap(mobile.locator('.model-trigger'));await mobile.screenshot({path:'evidence/mobile-menu-verified.png',scale:'css'});
 
-    return {screens:results,touch:'charging tap, charger drag, canvas rotation, disconnect, and day/night passed'};
+    return {screens:results,touch:'toolbar charging tap, canvas rotation, disconnect, quality toggle, and day/night passed'};
   } finally {
     await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:false});
     await cdp.send('Emulation.clearDeviceMetricsOverride');

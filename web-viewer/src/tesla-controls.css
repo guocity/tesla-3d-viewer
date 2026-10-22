@@ -127,3 +127,14 @@
   .model-filters,.model-footer { display:none; }
   .model-search { min-height:44px; }
 }
+
+/* Charging stays in the toolbar, leaving the car and charge port unobstructed. */
+.tesla-bottom .tesla-charge-hotspot {
+  position:static; transform:none; flex:0 0 44px; width:44px; height:44px;
+  min-width:44px; min-height:44px; padding:10px; border-radius:7px;
+  background:none; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none;
+  touch-action:manipulation; justify-content:center;
+}
+.tesla-bottom .tesla-charge-hotspot[hidden] { display:none; }
+.tesla-bottom .tesla-charge-hotspot[aria-pressed=true] { color:#75edb0; box-shadow:none; }
+.tesla-bottom [data-settings] { min-width:44px; }
