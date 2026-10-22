@@ -22,7 +22,8 @@ async page => {
       if(Math.abs(rotation)<.5||Math.sign(rotation)===Math.sign(dx))throw Error('Finger drag did not rotate the camera in the expected direction');
       results.push({dx,degrees:rotation*180/Math.PI});
       await page.waitForTimeout(300);
-      if(Math.abs(heading(await eye())-heading(after))>.03)throw Error('Camera continues moving after touch release');
+      const drift=heading(await eye())-heading(after);
+      if(drift<.001||drift>.03)throw Error('Expected slow steady orbit after release, got '+drift);
     }
     return results;
   } finally {

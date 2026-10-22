@@ -41,7 +41,15 @@ export function createSceneCamera(canvas) {
     if(Number.isFinite(distance)&&distance>0)target.copy(sourceCamera.eye).addScaledVector(sourceCamera.forward,distance);
     const offset=sourceCamera.eye.clone().sub(target);radius=offset.length();physicalLimit=radius;yaw=Math.atan2(offset.x,offset.z);pitch=Math.asin(clamp(offset.y/radius,-1,1));enabled=true;return true;
   }
-  function pose(now=performance.now()) {
+  let frameTime=0,lastPoseTime=null;
+  // Every scene pass (car, sky, reflections) must use the same camera pose.
+  // Advancing per draw lets a slow mobile frame render several different views.
+  const tick = now => { frameTime=now; globalThis.requestAnimationFrame?.(tick); };
+  globalThis.requestAnimationFrame?.(tick);
+  function pose(now=frameTime || performance.now()) {
+    const dt=lastPoseTime===null?0:Math.max(0,Math.min((now-lastPoseTime)/1000,.1));
+    lastPoseTime=now;
+    if(!transition && !mouse && !touches.size) yaw += .025*dt;
     if(transition){const t=clamp((now-transition.start)/260,0,1),s=t*t*(3-2*t);
       yaw=transition.yaw+transition.dyaw*s;pitch=transition.pitch+(.08-transition.pitch)*s;physicalLimit=transition.physicalLimit+(6.5-transition.physicalLimit)*s;radius=transition.radius+(transition.endRadius-transition.radius)*s;
       target.copy(transition.target).lerp(transition.endTarget,s);
@@ -68,7 +76,7 @@ export function createSceneCamera(canvas) {
   canvas.addEventListener?.('wheel',event=>{event.preventDefault();event.stopImmediatePropagation();zoom(event.deltaY);},{capture:true,passive:false});
   return {
     get current(){return current;},
-    reset(){cancel();sourceCamera=current=null;enabled=false;transition=null;mouse=null;touches.clear();target.set(0,.8,0);},
+    reset(){cancel();sourceCamera=current=null;enabled=false;transition=null;lastPoseTime=null;mouse=null;touches.clear();target.set(0,.8,0);},
     cancel,
     focus(point,done){
       if(!initialize()||!point)return false;cancel();
@@ -102,9 +110,10 @@ export function createSceneCamera(canvas) {
       const buffer=gl.getIndexedParameter(gl.UNIFORM_BUFFER_BINDING,data.binding);if(!buffer)return;
       const start=gl.getIndexedParameter(gl.UNIFORM_BUFFER_START,data.binding);
       let ranges=buffers.get(buffer);if(!ranges){ranges=[];buffers.set(buffer,ranges);}
-      const size=data.values.byteLength,cached=ranges.find(r=>r.start<=start&&r.start+r.bytes.length>=start+size);
-      if(cached)new Uint8Array(data.values.buffer).set(cached.bytes.subarray(start-cached.start,start-cached.start+size));
-      else {const previous=gl.getParameter(gl.COPY_READ_BUFFER_BINDING);gl.bindBuffer(gl.COPY_READ_BUFFER,buffer);gl.getBufferSubData(gl.COPY_READ_BUFFER,start,data.values);gl.bindBuffer(gl.COPY_READ_BUFFER,previous);}
+      // Read the current uniform buffer, including bufferData/orphaned storage.
+      // A stale upload cache can mix the animated sky camera with an older view.
+      const previous=gl.getParameter(gl.COPY_READ_BUFFER_BINDING);
+      gl.bindBuffer(gl.COPY_READ_BUFFER,buffer);gl.getBufferSubData(gl.COPY_READ_BUFFER,start,data.values);gl.bindBuffer(gl.COPY_READ_BUFFER,previous);
       if (data.eyeOnly) {
         if (!enabled) return;
         const originalEye=new Vector3().fromArray(data.values,data.offset/4);
@@ -125,7 +134,9 @@ export function createSceneCamera(canvas) {
       const view=new Matrix4().lookAt(eye,look,new Vector3(0,reflected?-1:1,0)).setPosition(eye).invert();
       // Widen the lens for distant framing while keeping the eye on the
       // showroom platform rather than passing through its surrounding rocks.
-      const projection=source.projection.clone(),wide=Math.min(1,physicalLimit/radius);
+      const rect=canvas.getBoundingClientRect(),aspect=rect.width/rect.height;
+      if(!data.projection || data.aspect!==aspect) { data.projection=source.projection.clone();data.aspect=aspect; }
+      const projection=data.projection.clone(),wide=Math.min(1,physicalLimit/radius);
       projection.elements[0]*=wide;projection.elements[5]*=wide;
       const replacement=projection.multiply(view),delta=replacement.clone().multiply(source.inverse);
       gl.uniform1f(data.active,1);if(data.delta)gl.uniformMatrix4fv(data.delta,false,delta.elements);if(data.inverse)gl.uniformMatrix4fv(data.inverse,false,delta.clone().invert().elements);if(data.eye)gl.uniform3f(data.eye,eye.x,eye.y,eye.z);

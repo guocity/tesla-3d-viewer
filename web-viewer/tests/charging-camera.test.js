@@ -40,11 +40,16 @@ test('charging transition completes once and orbit input stays free afterwards',
     getParameter:key=>key===1?program:null,getUniformLocation:(_,name)=>name,getProgramParameter:()=>2,getActiveUniform:(_,i)=>({name:['_group_0_binding_0_vs.mvp','_group_0_binding_0_vs.model'][i]}),getUniformIndices:()=>[0,1],getActiveUniforms:(_,indices,key)=>key===3?indices.map(i=>i*64):[0],getActiveUniformBlockParameter:()=>0,getIndexedParameter:key=>key===6?buffer:0,bindBuffer(){},getBufferSubData:(_,offset,target)=>target.set(values),uniform1f(){},uniform3f(){},uniformMatrix4fv(){}};
   camera.beforeDraw(gl);let completed=0;camera.focus(new Vector3(-1,1,2),()=>completed++);
   now=700;camera.beforeDraw(gl);assert.equal(completed,1);assert.ok(camera.current.eye.x<0);
-  const focused=camera.current.eye.clone();now=1500;camera.beforeDraw(gl);assert.ok(focused.distanceTo(camera.current.eye)<1e-8);assert.equal(completed,1);
+  const focused=camera.current.eye.clone();now=1500;camera.beforeDraw(gl);assert.ok(focused.distanceTo(camera.current.eye)>.001);assert.equal(completed,1);
   const event=(x,y)=>({button:0,clientX:x,clientY:y,preventDefault(){},stopImmediatePropagation(){}});
   events.mousedown(event(150,350));events.mousemove(event(230,350));events.mouseup(event(230,350));camera.beforeDraw(gl);
   assert.ok(focused.distanceTo(camera.current.eye)>1);
-  const rotated=camera.current.eye.clone();now=5000;camera.beforeDraw(gl);assert.ok(rotated.distanceTo(camera.current.eye)<1e-8);
+  const rotated=camera.current.eye.clone();now=5000;camera.beforeDraw(gl);assert.ok(rotated.distanceTo(camera.current.eye)>.001,'slow orbit resumes after release');
+  const sameFrame=camera.current.eye.clone();camera.beforeDraw(gl);
+  assert.ok(sameFrame.distanceTo(camera.current.eye)<1e-8,'all draw passes share one pose');
+  events.mousedown(event(230,350));
+  const held=camera.current.eye.clone();now+=100;camera.beforeDraw(gl);
+  assert.ok(held.distanceTo(camera.current.eye)<1e-8,'idle orbit pauses while dragging');
 });
 
 test('PBR fragment eye follows the camera even without a matrix uniform',()=>{

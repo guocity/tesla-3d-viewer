@@ -16,6 +16,8 @@ function serve(directory, req, res, next) {
 }
 export default defineConfig({
   base: './', publicDir: false,
+  // Keep an active 3D session intact while source files change.
+  server: { hmr: false, watch: null },
   optimizeDeps: { entries: ['index.html'] },
   plugins: [{
     name: 'static-viewer-assets',

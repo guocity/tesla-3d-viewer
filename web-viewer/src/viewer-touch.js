@@ -43,11 +43,10 @@ export function preventViewerKeyboard(doc) {
   const lock = () => doc.querySelectorAll('input,textarea').forEach(input => {
     input.readOnly = true;
     input.inputMode = 'none';
-    if (doc.activeElement === input) input.blur();
   });
   new MutationObserver(lock).observe(doc.body, { childList: true, subtree: true });
   doc.addEventListener('focusin', event => {
-    if (event.target.matches('input,textarea')) { lock(); event.target.blur(); }
+    if (event.target.matches('input,textarea')) lock();
   }, true);
   lock();
 }
