@@ -36,3 +36,95 @@
 .tesla-charge-hotspot { touch-action:none; user-select:none; -webkit-user-select:none; }
 
 .tesla-reference-icon { display:inline-block; flex-shrink:0; background:currentColor; vertical-align:middle; pointer-events:none; }
+
+/* Phones keep every control available, clear of notches and home indicators. */
+@media (max-width:700px) {
+  :root { --mobile-toolbar:64px; --mobile-header:64px; }
+  .vehicle-selector {
+    box-sizing:border-box; height:calc(var(--mobile-header) + env(safe-area-inset-top));
+    padding:env(safe-area-inset-top) max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left)); gap:12px;
+  }
+  .tesla-brand { width:76px; flex-shrink:0; overflow:hidden; }
+  .tesla-brand .tesla-reference-icon { transform:scale(.73); transform-origin:left center; }
+  .vehicle-selector .model-picker { position:static; width:auto; min-width:0; flex:1; }
+  .model-current { min-width:0; }
+  .vehicle-selector .model-trigger { min-height:44px; }
+  .model-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tesla-top-status { flex-shrink:0; gap:8px; }
+  .tesla-top-status time { display:none; }
+  .tesla-bottom {
+    box-sizing:border-box; display:flex;
+    gap:0 6px; height:calc(var(--mobile-toolbar) + env(safe-area-inset-bottom));
+    padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));
+  }
+  .tesla-controls-slot { grid-area:controls; justify-self:start; }
+  .tesla-bottom button { box-sizing:border-box; min-width:44px; min-height:44px; padding:6px; justify-content:center; }
+  .tesla-climate { grid-area:climate; margin:0; gap:2px; }
+  .tesla-climate span { min-width:53px; font-size:21px; }
+  .tesla-bottom>.tesla-climate,.tesla-bottom>[data-fan],.tesla-bottom>[data-defrost] { display:none; }
+
+  .tesla-bottom>[data-settings] { margin-left:auto; }
+  .tesla-bottom>.scene-appearance { grid-area:appearance; min-width:64px; justify-self:end; }
+  .tesla-bar-spacer { display:none; }
+  .model-menu {
+    position:fixed; top:calc(var(--mobile-header) + env(safe-area-inset-top) + 8px);
+    left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); width:auto;
+    max-height:calc(100dvh - var(--mobile-header) - var(--mobile-toolbar) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px);
+  }
+  .model-options { max-height:none; min-height:0; }
+  .model-search input { font-size:16px; }
+  .model-close,.showroom-motion [data-close] { min-width:44px; min-height:44px; }
+  .model-filters button { min-height:44px; }
+  .showroom-motion {
+    box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden;
+    left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); width:auto;
+    bottom:calc(var(--mobile-toolbar) + env(safe-area-inset-bottom) + 12px); padding:18px;
+    max-height:calc(100dvh - var(--mobile-header) - var(--mobile-toolbar) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px);
+  }
+  .motion-heading,.motion-caption { flex-shrink:0; }
+  .motion-heading { margin-bottom:12px; }
+  .motion-heading h2 { font-size:22px; }
+  .motion-switches { min-height:0; max-height:none; overflow:auto; overscroll-behavior:contain; }
+  .showroom-motion .motion-switch { min-height:44px; }
+  .motion-caption { margin-top:12px; }
+  .tesla-display-settings { bottom:calc(var(--mobile-toolbar) + env(safe-area-inset-bottom) + 12px); max-width:calc(100vw - 48px); }
+  .tesla-display-settings select { min-height:44px; font-size:16px; }
+  .tesla-charge-progress { bottom:calc(var(--mobile-toolbar) + env(safe-area-inset-bottom) + 12px); max-width:calc(100vw - 64px); }
+  .charge-tooltip { display:none; }
+}
+/* Short landscape screens need one row so the car keeps enough viewing room. */
+@media (max-height:500px) and (orientation:landscape) {
+  :root { --mobile-toolbar:56px; --mobile-header:52px; }
+  .vehicle-selector { box-sizing:border-box; height:calc(52px + env(safe-area-inset-top)); padding-top:env(safe-area-inset-top); }
+  .tesla-bottom { box-sizing:border-box; display:flex; gap:6px; height:calc(56px + env(safe-area-inset-bottom)); padding:0 max(8px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px,env(safe-area-inset-left)); }
+  .tesla-bottom button { min-width:44px; min-height:44px; padding:6px; }
+  .tesla-climate { margin-left:auto; gap:2px; }
+  .tesla-climate span { font-size:21px; min-width:53px; }
+  .tesla-bottom>.tesla-climate,.tesla-bottom>[data-fan],.tesla-bottom>[data-defrost] { display:none; }
+  .tesla-bottom>[data-settings] { margin-left:auto; }
+  .tesla-bottom>.scene-appearance { margin-left:0; }
+  .showroom-motion { display:flex; flex-direction:column; overflow:hidden; bottom:calc(68px + env(safe-area-inset-bottom)); max-height:calc(100dvh - 132px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding:12px; }
+  .motion-heading { margin-bottom:8px; }
+  .motion-heading h2 { font-size:18px; }
+  .motion-switches { min-height:0; max-height:none; overflow:auto; }
+  .motion-caption { margin-top:8px; }
+  .model-menu { position:fixed; top:calc(56px + env(safe-area-inset-top)); left:max(12px,env(safe-area-inset-left)); right:max(12px,env(safe-area-inset-right)); width:auto; max-height:calc(100dvh - 124px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding:10px 14px 0; }
+  .model-close,.showroom-motion [data-close] { min-width:44px; min-height:44px; }
+  .model-search input { font-size:16px; }
+  .vehicle-selector .model-trigger { min-height:44px; }
+  .model-menu-heading { padding-bottom:6px; }
+  .model-menu h2 { font-size:18px; margin:0; }
+  .model-search { padding:6px 10px; }
+  .model-filters { margin:4px 0; }
+  .model-footer { margin-top:4px; padding:6px 4px; }
+}
+#rive-stage canvas { touch-action:none; }
+
+@media (pointer:coarse) and (min-width:701px) and (min-height:501px) {
+  .tesla-bottom>.tesla-climate,.tesla-bottom>[data-fan],.tesla-bottom>[data-defrost] { display:none; }
+  .tesla-bottom button,.vehicle-selector .model-trigger { min-height:44px; }
+}
+@media (max-height:500px) and (orientation:landscape) {
+  .model-filters,.model-footer { display:none; }
+  .model-search { min-height:44px; }
+}

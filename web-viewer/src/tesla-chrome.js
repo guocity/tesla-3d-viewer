@@ -16,6 +16,7 @@ export function createTeslaChrome({ panel, controls, appearance, quality, setTem
   bar.querySelector('[data-fan]').innerHTML = teslaIcon('fan');
   bar.querySelector('[data-defrost]').innerHTML = teslaIcon('defrost');
   controls.innerHTML = `${teslaIcon('controls',36)}<span>Controls</span>`;
+  controls.setAttribute('aria-label','Vehicle controls');
   let temperature = 21.5, fan = false, defrost = false;
   const changeTemperature = delta => { temperature = Math.min(28, Math.max(16, temperature + delta)); bar.querySelector('[data-temperature]').textContent = `${temperature.toFixed(1)}°`; setTemperature(temperature); };
   bar.querySelector('[data-cool]').onclick = () => changeTemperature(-.5);

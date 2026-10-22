@@ -2,6 +2,8 @@
 export function sceneMaterial(materialName, nodeName = '', rear = false) {
   const name = materialName.toLowerCase();
   const part = nodeName.toLowerCase();
+  // Cybertruck's dark aero wheel covers should read as matte molded plastic.
+  if (name === 'wheel_rim__premium_wheel') return 'BottomCar';
   const lamp = /^(?:headlight|taillight)(?:__|$)|^trim__(?:lights?|brake)(?:_|$)|^trim__turnsignal.*brakes|^glass(?:_clear)?__glass_lights/.test(name);
   const rearName = /(?:brake|tail|rear|back)[_ .-]*(?:lights?|lamps?)|(?:lights?|lamps?)[_ .-]*(?:rear|trunk)|lights?_spoiler/.test(part);
   // Several APK meshes called "Headlights" contain both front and rear lamps.

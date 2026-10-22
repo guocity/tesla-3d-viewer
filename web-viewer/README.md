@@ -72,3 +72,19 @@ For the live viewer regression check, start `npm run dev`, open its URL with `pl
 Drags beginning on the charging plug are forwarded to the showroom camera for both mouse and touch; a tap still operates the charger. Cybertruck rear lighting has three red running segments (center plus the upper left/right fixtures), exclusive of the separate lower brake sections. Front square covers are clear with round internal projectors; turn emitters default off.
 
 `ads/lgnat.jpg` supplies the monitor's first ad (black LGNAT.COM on white). The existing LED monitor alternates the ad with its original color program, retaining perspective, occlusion, reflections and lighting.
+
+On phones, the bottom bar uses one row with Controls, Display and Day/Night;
+climate readouts and climate icons are hidden. Menus stay within the viewport,
+interactive targets are at least 44px, and safe-area insets protect controls from
+notches and home indicators. Landscape uses compact scrollable panels. The
+charging hotspot is kept between the actual header and bottom bar.
+
+Run `playwright-cli -s=viewer-check run-code "$(cat scripts/check-mobile.browser.js)"`
+against the viewer for six phone/tablet layouts, native emulated touch taps,
+vehicle-menu scrolling, search, vehicle toggles, charger dragging, direct canvas
+rotation, charging/disconnect and day/night. This is Chromium mobile emulation;
+physical iOS/Android browser checks are separate.
+
+Cybertruck's four Premium aero wheel covers use the matte `BottomCar` material
+preset, rather than the reflective metal rim preset. Other wheel finishes keep
+their existing material mapping.

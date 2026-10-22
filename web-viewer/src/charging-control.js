@@ -10,6 +10,7 @@ export function createChargingControl({ canvas, getInstance, getAnimations }) {
   const info = document.createElement('div'); info.className = 'tesla-charge-progress'; info.hidden = true;
   info.setAttribute('role','status'); info.innerHTML = `<span class="charging-symbol">${plug}</span><div><strong>Charging</strong><span>Click the plug to disconnect</span></div>`;
   document.body.append(button, info);
+  const header=document.querySelector('.vehicle-selector'), toolbar=document.querySelector('.tesla-bottom');
   let connected = false, busy = false, generation = 0, animations, fadeTimer;
   function showInfo(visible) {
     clearTimeout(fadeTimer);
@@ -49,7 +50,9 @@ export function createChargingControl({ canvas, getInstance, getAnimations }) {
       const y = vm.number('pin2y').value / height * rect.height + rect.top;
       if (!gesture.dragging) {
         button.style.left = `${Math.max(30, Math.min(innerWidth - 30, x))}px`;
-        button.style.top = `${Math.max(100, Math.min(innerHeight - 110, y))}px`;
+        const top=(header?.getBoundingClientRect().bottom ?? 76)+24;
+        const bottom=(toolbar?.getBoundingClientRect().top ?? innerHeight-82)-24;
+        button.style.top = `${Math.max(top, Math.min(bottom, y))}px`;
       }
       button.hidden = false;
       if (animations) {

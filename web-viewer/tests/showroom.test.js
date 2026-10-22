@@ -116,3 +116,8 @@ test('Cybertruck axis tracks open the cap before connecting and reverse on disco
     controller.dispose();
   } finally {Object.assign(globalThis,previous);}
 });
+
+test('Cybertruck wheel covers use matte plastic while other metal rims stay metallic', () => {
+  assert.equal(sceneMaterial('wheel_rim__Premium_Wheel','Premium_Wheel'),'BottomCar');
+  assert.equal(sceneMaterial('wheel_rim__Arachnid','Wheel'),'MetallicGray');
+});
