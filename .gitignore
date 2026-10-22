@@ -9,4 +9,3 @@ node_modules/
 web-viewer/dist/
 .playwright-cli/
 web-viewer/generated/
-site-assets
