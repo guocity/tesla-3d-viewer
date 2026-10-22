@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { hideSceneMedia, hideOriginalMenus } from '../src/scene-interface.js';
+import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots } from '../src/scene-interface.js';
 
 test('media edit preserves all authored scene bytes and object indices', () => {
   const original = readFileSync(new URL('../public/reference/file.riv', import.meta.url));
@@ -31,4 +31,14 @@ test('BMW menu roots are hidden while Garage geometry is preserved', () => {
   for (let i = 0; i < view.getUint32(start + 4, true); i++) end += 64 + view.getUint32(end + 36, true) * 20 + view.getUint32(end + 40, true) * 4;
   assert.deepEqual(result.subarray(start, end), source.subarray(start, end));
   assert.ok(result.includes(Buffer.from([4,9,...Buffer.from('HUD Inner'),5,2,18,0,0,0,0,0])));
+});
+
+test('legacy hotspots are collapsed so their hit targets are disabled', () => {
+  const original = readFileSync(new URL('../public/reference/file.riv', import.meta.url));
+  const result = Buffer.from(disableVehicleHotspots(Uint8Array.from(original).buffer));
+  assert.equal(result.length, original.length + 40);
+  for (const name of ['Pin 0','Pin 1','Pin 2','Pin 3']) {
+    const marker = Buffer.from([4,name.length,...Buffer.from(name),5,34,16,0,0,0,0,17,0,0,0,0,0]);
+    assert.ok(result.includes(marker), `${name} must have zero scale on both axes`);
+  }
 });

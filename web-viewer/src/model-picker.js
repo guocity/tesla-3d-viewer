@@ -1,3 +1,9 @@
+// Bundled studio images matched to each vehicle generation; no remote image requests.
+const thumbnails = import.meta.glob('./assets/vehicles/*.webp', { eager: true, query: '?url', import: 'default' });
+function vehicleImage(id) {
+  const src = thumbnails[`./assets/vehicles/${id}.webp`];
+  return src ? `<img src="${src}" alt="" width="80" height="50" decoding="async">` : car;
+}
 const chevron = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m7 10 5 5 5-5"/></svg>';
 const car = '<svg viewBox="0 0 80 36" fill="none"><path d="m9 24 3-8 14-2 9-9h21l11 10 7 3 2 7H9Z" fill="currentColor" opacity=".16"/><path d="m9 24 3-8 14-2 9-9h21l11 10 7 3 2 7H9ZM28 14h35M40 6l-3 8" stroke="currentColor" stroke-width="1.5"/><circle cx="24" cy="25" r="5" fill="currentColor"/><circle cx="64" cy="25" r="5" fill="currentColor"/></svg>';
 const names = {
@@ -20,6 +26,7 @@ export function createModelPicker(select) {
   function render() {
     const selected = names[select.value] || [select.selectedOptions[0]?.textContent || 'Choose a vehicle', ''];
     host.querySelector('.model-name').textContent = selected[0];
+    host.querySelector('.model-icon').innerHTML = vehicleImage(select.value);
     trigger.setAttribute('aria-label', `Change vehicle, currently ${selected.join(' · ')}`);
     options.replaceChildren();
     let count = 0;
@@ -32,7 +39,7 @@ export function createModelPicker(select) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'model-option'; button.dataset.value = option.value;
       button.setAttribute('aria-pressed', String(option.value === select.value));
-      button.innerHTML = `<span class="model-thumbnail">${car}</span><span class="model-option-copy"><strong></strong><span></span></span><span class="model-check" aria-hidden="true">${option.value === select.value ? '✓' : '↗'}</span>`;
+      button.innerHTML = `<span class="model-thumbnail">${vehicleImage(option.value)}</span><span class="model-option-copy"><strong></strong><span></span></span><span class="model-check" aria-hidden="true">${option.value === select.value ? '✓' : '↗'}</span>`;
       button.querySelector('strong').textContent = name; button.querySelector('.model-option-copy > span').textContent = subtitle;
       button.onclick = () => { if (select.value !== option.value) { select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); } render(); close(true); };
       options.append(button);

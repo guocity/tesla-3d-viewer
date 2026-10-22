@@ -647,6 +647,14 @@ def parse_animation(text):
             track.update(times=[float(x) for x in tm.group(1).split(",")], values=[[float(x) for x in v.split(",")] for v in values])
             if transforms and any(len(v) != 12 for v in track["values"]):
                 raise ValueError("Invalid Transform-valued animation track")
+        elif kind == "bezier":
+            tm = re.search(r'"times": PoolRealArray\( ([^)]*)\)', keys)
+            points = re.search(r'"points": PoolRealArray\( ([^)]*)\)', keys)
+            if not tm or not points: continue
+            times = [float(x) for x in tm.group(1).split(",")]
+            values = [float(x) for x in points.group(1).split(",")]
+            if len(values) != len(times) * 5: raise ValueError("Invalid Bezier animation track")
+            track.update(times=times, values=values[::5], handles=[values[i+1:i+5] for i in range(0,len(values),5)])
         else: continue
         if len(track.get("times", [])) == len(track.get("values", [])) and track.get("times"):
             tracks.append(track)

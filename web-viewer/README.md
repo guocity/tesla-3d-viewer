@@ -18,7 +18,7 @@ Compressed `.bin` containers are decoded with the browser's DecompressionStream,
 
 ## Scene appearance
 
-**Day / Night** in the Tesla bottom bar uses the original Garage state machine’s authored N shortcut, preserving its sky, lighting, reflections, camera and HUD. The mini-player is hidden by setting only its Visor container opacity in the assembled runtime buffer; the source `.riv` stays unchanged. No replacement scene is used. The BMW Panel and Visor UI roots are hidden in the assembled buffer. Tesla top and bottom bars sit above the original scene; vehicle controls and display settings start closed. The appearance command is advanced between key-down and key-up so the Garage script receives it, including after a model reload.
+**Day / Night** in the Tesla bottom bar uses the original Garage state machine’s authored N shortcut, preserving its sky, lighting, reflections, camera and HUD. The mini-player is hidden by setting only its Visor container opacity in the assembled runtime buffer; the source `.riv` stays unchanged. No replacement scene is used. The BMW Panel and Visor UI roots are hidden in the assembled buffer. Tesla top and bottom bars sit above the original scene; vehicle controls and display settings start closed. Each appearance command explicitly focuses the Garage keyboard target before sending N, advances between key-down and key-up, and releases focus afterwards. The HTML label changes only when Rive accepts the command, including after a model reload.
 
 ## Showroom animation switches
 
@@ -58,3 +58,13 @@ Reference: https://rive-vehicle-interface-i8bka7.uat.rive.to/
 `reference-assets.json` records the original URLs and checksums. The checked-in `.riv` is retained as conversion source, unchanged; vehicle payloads and fixed-width captions are replaced only in assembled runtime buffers. The reference scene/player retain their original ownership and terms; this repository grants no additional license for them.
 
 The native `../TeslaMetalViewer`, launcher, shared model sources and extraction tools are independent of this package and unchanged.
+
+## Charging control
+
+The menus use translucent glass surfaces. The legacy steering, headlight and fan hotspots are collapsed to disable their hit targets. An accessible plug control follows the scene’s projected charging point. Clicking it plays the source charge-port clip, then connects the model’s APK charger handle and cable where those assets are available. Clicking again removes the charger before closing the port. The charger starts hidden, and changing models resets the connection. The plug and cable stay in their fitted pose and fade using tagged-vertex coverage in the original scene shader. The plug-shaped charging indicator fades in/out and gently changes opacity while connected. Cybertruck and the Juniper variants have no packaged cable geometry, so they show the charging indicator and available port animation without a cable.
+
+Vehicle picker thumbnails use locally bundled studio/stock images; source URLs and generation mappings are recorded in `src/assets/vehicles/SOURCES.md`. Juniper E41/E80 share the verified Juniper exterior image.
+
+Cybertruck charging retains the source scalar Bezier rotation channels and their time/value handles. Its `Spatials/ChargeportMarker` supplies the charging cable anchor when the older `ChargePort` node is absent.
+
+For the live viewer regression check, start `npm run dev`, open its URL with `playwright-cli -s=viewer-check open <url>`, then run `playwright-cli -s=viewer-check run-code "$(cat scripts/check-viewer.browser.js)"`. This checks scene-authored day/night commands across HTML focus changes and vehicle reloads, Cybertruck charging/disconnect, default-off roof bar, and all twelve studio images. Run `python3 tools/test_charging_export.py` from the repository root for the exporter regression.

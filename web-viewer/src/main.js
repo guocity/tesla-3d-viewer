@@ -1,6 +1,7 @@
+import { createChargingControl } from './charging-control.js';
 import { createTeslaChrome } from './tesla-chrome.js';
 import { toggleSceneAppearance } from './scene-appearance.js';
-import { hideSceneMedia, hideOriginalMenus } from './scene-interface.js';
+import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots } from './scene-interface.js';
 import { createVehicleBridge } from './gpu-vehicle-bridge.js';
 import * as rive from '@rive-app/webgl2';
 import wasmUrl from '@rive-app/webgl2/rive.wasm?url';
@@ -64,10 +65,13 @@ async function showVehicle() {
   const request = ++token;
   const selected = select.value;
   const vehicle = manifest.vehicles.find(v => v.id === selected);
+  charging.reset();
+  appearance.disabled = true;
   animationController?.stop();
   motionPanel.hidden = true; mode.setAttribute('aria-expanded', 'false');
   chrome.closePanels();
   canvas.style.visibility = 'hidden';
+  delete document.getElementById('rive-stage').dataset.ready;
   progress(`Loading ${vehicle?.name || 'BMW XM'}…`);
   const { readAsset } = await loader;
   shellPromise ||= readAsset(new URL(manifest.scene.file, assetBase).href).catch(e => { shellPromise = null; throw e; });
@@ -88,7 +92,9 @@ async function showVehicle() {
   currentParts = bridge.setVehicle(packed);
   currentRig = rig;
   animationController?.bind(currentRig, currentParts);
-  const buffer = hideOriginalMenus(hideSceneMedia(replaceVehicleBlob(shell.slice(0), packed, selected !== 'bmw')));
+  await ensureAnimations();
+  if (request !== token) return;
+  const buffer = disableVehicleHotspots(hideOriginalMenus(hideSceneMedia(replaceVehicleBlob(shell.slice(0), packed, selected !== 'bmw'))));
   // Reload through the existing renderer so its GPU context stays valid.
   const load = { buffer, artboard: 'Garage', stateMachine: 'Garage', autoplay: true, autoBind: true, enableGPUCanvas: true };
   if (instance) instance.load(load);
@@ -100,12 +106,14 @@ async function showVehicle() {
       vm.number('section').value = -1;
       vm.number('playing').value = 0;
       // The original BMW HUD stays closed; Tesla controls are an HTML layer.
-      if (nightMode) toggleSceneNight();
       resize();
       let finished = false;
       const loadedToken = token;
       const reveal = () => {
         if (finished || loadedToken !== token) return; finished = true;
+        animationController?.refresh();
+        if (nightMode) toggleSceneNight();
+        appearance.disabled = false;
         canvas.style.visibility = 'visible'; status.hidden = true;
         document.getElementById('rive-stage').dataset.ready = 'true';
         if (document.hidden) instance.pause();
@@ -136,7 +144,7 @@ boot().catch(error);
 // environment lighting and reflections, without substituting another scene.
 let nightMode = false;
 const appearance = document.createElement('button');
-appearance.type = 'button'; appearance.className = 'scene-appearance';
+appearance.disabled = true; appearance.type = 'button'; appearance.className = 'scene-appearance';
 appearance.textContent = '☀ Day'; appearance.setAttribute('aria-label', 'Switch to night'); appearance.setAttribute('aria-pressed', 'false');
 panel.append(appearance);
 function toggleSceneNight() { return toggleSceneAppearance(instance); }
@@ -160,3 +168,8 @@ const chrome = createTeslaChrome({
   setDefrost(on) { const vm = instance?.viewModelInstance; if (vm) vm.number('defrost').value = Number(on); },
 });
 panel.querySelector('label[for=quality]')?.remove();
+
+const charging = createChargingControl({
+  canvas, getInstance: () => instance,
+  getAnimations: async () => { await ensureAnimations(); return animationController; },
+});

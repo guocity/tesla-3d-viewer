@@ -21,6 +21,13 @@ export function sampleTrack(track, time) {
     transform(a).decompose(pa, qa, sa); transform(b).decompose(pb, qb, sb);
     return { position: pa.lerp(pb, f), quaternion: qa.slerp(qb, f), scale: sa.lerp(sb, f) };
   }
+  if (track.type === 'bezier' && track.handles && hi !== lo) {
+    const [,,outX,outY] = track.handles[lo], [inX,inY] = track.handles[hi];
+    const cubic = (a,b,c,d,t) => (1-t)**3*a + 3*(1-t)**2*t*b + 3*(1-t)*t*t*c + t**3*d;
+    let left=0, right=1;
+    for (let i=0;i<24;i++) { const mid=(left+right)/2; if(cubic(times[lo],times[lo]+outX,times[hi]+inX,times[hi],mid)<time)left=mid;else right=mid; }
+    return cubic(a,a+outY,b+inY,b,(left+right)/2);
+  }
   if (typeof a === 'number') return a + (b - a) * f;
   return a.map((v, i) => v + (b[i] - v) * f);
 }

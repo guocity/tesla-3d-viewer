@@ -41,3 +41,28 @@ export function hideOriginalMenus(source) {
   }
   return bytes.buffer;
 }
+
+// Collapse the old fan, steering and headlight hit targets, not just their
+// opacity: invisible Rive nodes would otherwise still accept clicks.
+export function disableVehicleHotspots(source) {
+  const bytes = new Uint8Array(source), positions = [];
+  for (const name of ['Pin 0', 'Pin 1', 'Pin 2', 'Pin 3']) {
+    const marker = new Uint8Array([4, name.length, ...new TextEncoder().encode(name), 5, 34, 0]);
+    let found = -1;
+    outer: for (let i = 0; i <= bytes.length - marker.length; i++) {
+      for (let j = 0; j < marker.length; j++) if (bytes[i+j] !== marker[j]) continue outer;
+      if (found >= 0) throw new Error(`Ambiguous ${name} hotspot`);
+      found = i + marker.length - 1;
+    }
+    if (found < 0) throw new Error(`Missing ${name} hotspot`);
+    positions.push(found);
+  }
+  positions.sort((a,b)=>a-b);
+  const result = new Uint8Array(bytes.length + positions.length * 10);
+  let start=0, at=0;
+  for (const position of positions) {
+    result.set(bytes.subarray(start,position),at); at += position-start;
+    result.set([16,0,0,0,0,17,0,0,0,0],at); at+=10; start=position;
+  }
+  result.set(bytes.subarray(start),at); return result.buffer;
+}

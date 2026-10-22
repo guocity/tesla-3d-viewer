@@ -19,6 +19,7 @@ def attach(builder, tscn_path):
         if name.lower().startswith('airflow') and matrix:
             climate.append({'name':name,'matrix':matrix,'source':str(tscn_path.relative_to(c.EXTRACTED_ROOT))})
         if name == 'ChargePort' and matrix: charge_transform = matrix
+        elif name == 'ChargeportMarker' and matrix and charge_transform is None: charge_transform = matrix
     from source_noise import airflow_noise
     noise_index = len(builder.source_textures)
     builder.source_textures.append({"source":"res://mobile/materials/noiseTexture.tres","width":512,"height":512,"encoding":"png","bufferView":builder._append_bytes(airflow_noise())})

@@ -1,3 +1,4 @@
+import { patchChargingFadeShader } from './charging-fade.js';
 // Pinned Rive WebGL2 adapter. Match complete packed mesh signatures before
 // retaining a buffer; unrelated UI, index and uniform uploads are never modified.
 export function createVehicleBridge(canvas) {
@@ -23,6 +24,10 @@ export function createVehicleBridge(canvas) {
     const gl = getContext.apply(this, args);
     if (!gl || !args[0].includes('webgl') || contexts.has(gl)) return gl;
     contexts.add(gl);
+    if (gl.shaderSource) {
+      const shaderSource = gl.shaderSource;
+      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchChargingFadeShader(source)); };
+    }
     for (const method of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced','drawRangeElements','blitFramebuffer','flush']) {
       const originalDraw = gl[method];
       if (!originalDraw) continue;

@@ -21,3 +21,10 @@ test('Godot row-major 12-value transforms preserve the source origin', () => {
   assert.deepEqual(sample.position.toArray(), [3, 4, 5]);
   assert.deepEqual(sample.scale.toArray(), [1, 1, 1]);
 });
+
+test('Bezier channels respect time handles rather than linearly blending key values', () => {
+  const track={type:'bezier',times:[0,1],values:[0,1],handles:[[0,0,1/3,0],[-1/3,-1,0,0]]};
+  assert.ok(Math.abs(sampleTrack(track,.5)-.125)<1e-6);
+  assert.ok(Math.abs(sampleTrack(track,0))<1e-6);
+  assert.equal(sampleTrack(track,1),1);
+});
