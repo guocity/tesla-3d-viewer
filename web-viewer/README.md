@@ -39,13 +39,16 @@ Combined lamp meshes are split by triangle position along each model’s actual 
 
 The static build copies these folders under `dist/data/`. Original GLBs and the archived legacy studio are retained locally as development/source material; the hosted viewer does not download or render a separate studio.
 
-## GitHub Pages
+## GitHub Pages & Custom Domain (`tesla.lgnat.com`)
 
-1. Commit `web-viewer/` including **`site-assets/`**, the pnpm lockfile, and `.github/workflows/web-viewer-pages.yml`. The `site-assets` files are needed: the original root `models/` folder is intentionally ignored and is not present in a fresh checkout.
-2. In the GitHub repository, choose **Settings → Pages → Source → GitHub Actions**.
-3. Run **Actions → Deploy web viewer to GitHub Pages → Run workflow**.
+1. Ensure GitHub Pages is configured: in the GitHub repository, choose **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+2. DNS Configuration for `tesla.lgnat.com`:
+   - Add a `CNAME` record in your DNS provider:
+     - **Name/Host**: `tesla`
+     - **Target**: `guocity.github.io.` (or your GitHub Pages username domain)
+3. Deployments trigger automatically on `git push` to `main` and can also be triggered manually under **Actions → Deploy web viewer to GitHub Pages → Run workflow**.
 
-The workflow installs with pnpm, runs tests, builds from the prepared assets, and publishes only `web-viewer/dist/`. It is manually triggered; local changes do not deploy automatically. All runtime paths are relative and support project URLs such as `https://OWNER.github.io/REPO/`.
+The workflow installs with pnpm, runs tests, builds from the prepared assets, ensures the `CNAME` file for `tesla.lgnat.com`, and publishes `web-viewer/dist/`. All runtime paths are relative.
 
 The complete compressed deployment payload is approximately 45 MB plus the runtime and viewer code, below GitHub Pages' 1 GB published-site limit. Each file is below GitHub's normal per-file limit. Visitors only download their selected vehicle; small source animation rigs are loaded with their selected vehicle. No APK, Metal build or extraction tool is required on the hosting server.
 

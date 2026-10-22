@@ -31,6 +31,7 @@ export default defineConfig({
       mkdirSync(path.join(dist, 'reference'), { recursive: true });
       for (const name of ['hosted.js', 'hosted.css', 'drawer.riv']) cpSync(path.join(root, 'public/reference', name), path.join(dist, 'reference', name));
       cpSync(path.join(root, 'public/asset-loader.js'), path.join(dist, 'asset-loader.js'));
+      if (existsSync(path.join(root, 'public/CNAME'))) cpSync(path.join(root, 'public/CNAME'), path.join(dist, 'CNAME'));
       const manifest = JSON.parse(readFileSync(path.join(root, 'site-assets/manifest.json')));
       const entries = [manifest.scene, manifest.bmw, ...manifest.vehicles.flatMap(v => [v.packed, v.rig].filter(Boolean)), ...Object.values(manifest.files)];
       mkdirSync(path.join(dist, 'data'), { recursive: true });
