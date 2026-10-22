@@ -1,3 +1,4 @@
+import { vehicleBodyBounds, groundChargingCable } from './charging-geometry.js';
 import { splitCybertruckRearLamps, correctCybertruckFrontLamps } from './cybertruck-optics.js';
 import { Box3, Matrix3, Matrix4, Vector3 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -7,7 +8,7 @@ export { replaceVehicleBlob };
 const encoder = new TextEncoder();
 const MAGIC = encoder.encode('RCP2');
 
-import { sceneMaterial } from './vehicle-materials.js';
+import { sceneMaterial, wheelCoverMaterial } from './vehicle-materials.js';
 
 function octNormal(n) {
   const d = Math.abs(n.x) + Math.abs(n.y) + Math.abs(n.z) || 1;
@@ -28,22 +29,29 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
     splitCybertruckRearLamps(root);
     correctCybertruckFrontLamps(root);
     root.updateMatrixWorld(true);
-    let box = new Box3().setFromObject(root);
+    let box = vehicleBodyBounds(root);
     let size = box.getSize(new Vector3());
     // APK models can use X or Z for the long axis; Rive's car faces +Z.
     if (size.x > size.z * 1.25) {
       root.rotation.y += Math.PI / 2;
       root.updateMatrixWorld(true);
-      box = new Box3().setFromObject(root);
+      box = vehicleBodyBounds(root);
       size = box.getSize(new Vector3());
     }
+    groundChargingCable(root, box.min.y);
     const center = box.getCenter(new Vector3());
     // Fit the same display footprint. Preserve each car's proportions.
     const scale = 5.11564 / Math.max(size.z, size.x);
     const quant = [size.x * scale * 1.5 + 0.001, size.y * scale * 2 + 0.001, size.z * scale + 0.001];
+    // Quantization must also contain the cable beyond the body footprint.
+    const fullBox = new Box3().setFromObject(root);
+    quant[0]=Math.max(quant[0],Math.max(Math.abs(fullBox.min.x-center.x),Math.abs(fullBox.max.x-center.x))*scale+.001);
+    quant[1]=Math.max(quant[1],Math.max(Math.abs(fullBox.min.y-box.min.y),Math.abs(fullBox.max.y-box.min.y))*scale+.001);
+    quant[2]=Math.max(quant[2],Math.max(Math.abs(fullBox.min.z-center.z),Math.abs(fullBox.max.z-center.z))*scale+.001);
     const rearAxis = size.x > size.z ? 0 : 2;
     const rearSign = rearAxis === 0 ? -1 : 1;
     const meshes = [];
+    const materialOrder = new Map();
     root.traverse(mesh => {
       if (!mesh.isMesh || !mesh.visible) return;
       const geometry = mesh.geometry;
@@ -65,13 +73,17 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
           // Imported scene roots can retain a fixed matrix: classify on the
           // actual world-space long axis, not an assumed applied rotation.
           const rear = (longitudinal - center.getComponent(rearAxis)) * rearSign > size.getComponent(rearAxis) * 0.2;
-          const name = sceneMaterial(material.name, mesh.name, rear);
+          const originalName = sceneMaterial(material.name, mesh.name, rear);
+          if (!materialOrder.has(originalName)) materialOrder.set(originalName, materialOrder.size);
+          const name = wheelCoverMaterial(material.name, mesh.name) ?? originalName;
           if (!buckets.has(name)) buckets.set(name, []);
           buckets.get(name).push(...indices);
         }
         for (const [name, indices] of buckets) meshes.push({ mesh, geometry, group: { start: 0, count: indices.length, indices }, name });
       }
     });
+    // Preserve the original material batch order when covers move to BottomCar.
+    meshes.sort((a, b) => (materialOrder.get(a.name) ?? Infinity) - (materialOrder.get(b.name) ?? Infinity));
     const lengths = meshes.map(({ geometry, group }) => 64 + geometry.attributes.position.count * 20 + group.count * 4);
     const buffer = new ArrayBuffer(112 + lengths.reduce((a, b) => a + b, 0));
     const bytes = new Uint8Array(buffer);

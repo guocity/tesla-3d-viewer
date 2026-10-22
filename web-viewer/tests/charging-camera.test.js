@@ -46,3 +46,11 @@ test('charging transition completes once and orbit input stays free afterwards',
   assert.ok(focused.distanceTo(camera.current.eye)>1);
   const rotated=camera.current.eye.clone();now=5000;camera.beforeDraw(gl);assert.ok(rotated.distanceTo(camera.current.eye)<1e-8);
 });
+
+test('PBR fragment eye follows the camera even without a matrix uniform',()=>{
+  const fragment='precision highp int; void main(){ vec3 v=normalize(_group_0_binding_0_fs.eye.xyz-position); vec4 color=exposureOut(albedo); }';
+  const patched=patchSceneCameraShader(fragment);
+  assert.ok(patched.includes('showroomCameraEye(_group_0_binding_0_fs.eye).xyz'));
+  assert.ok(patched.includes('vec4 color=exposureOut(albedo)'));
+  assert.equal(patchSceneCameraShader(patched),patched);
+});

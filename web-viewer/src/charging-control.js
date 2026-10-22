@@ -12,7 +12,7 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
   info.setAttribute('role','status'); info.innerHTML = `<span class="charging-symbol">${plug}</span><div><strong>Charging</strong><span>Click the plug to disconnect</span></div>`;
   document.body.append(button, info);
   const header=document.querySelector('.vehicle-selector'), toolbar=document.querySelector('.tesla-bottom');
-  let connected = false, busy = false, generation = 0, animations, fadeTimer, pendingFocus=false;
+  let connected = false, busy = false, generation = 0, animations, fadeTimer;
   function showInfo(visible) {
     clearTimeout(fadeTimer);
     if (visible) {
@@ -23,7 +23,7 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
       fadeTimer=setTimeout(() => { if (!connected) info.hidden=true; }, 360);
     }
   }
-  const cameraControl=createChargeCamera({canvas,bridge,onState:state=>button.dataset.view=state});
+  const cameraControl=createChargeCamera({canvas,bridge,getInstance,onState:state=>button.dataset.view=state});
   async function toggle() {
     const instance = getInstance(); if (!instance?.loaded || document.getElementById('rive-stage').dataset.ready !== 'true' || busy) return;
     busy = true; button.disabled = true;
@@ -32,18 +32,19 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
       animations = await getAnimations();
       if (request !== generation) return;
       const next = !connected;
-      animations.setCharging(next);
       connected = next;
-      pendingFocus=next;
-      if(!next)cameraControl.cancel();
+      if(!next){cameraControl.cancel();animations.setCharging(false);}
       button.setAttribute('aria-pressed', String(connected));
       button.setAttribute('aria-label', connected ? 'Disconnect charging and close charge port' : 'Open charge port and start charging');
       document.documentElement.dataset.charging = String(connected);
       showInfo(connected);
+      if(next){
+        const label=info.querySelector('strong');if(label)label.textContent='Moving to charge port';
+        await cameraControl.focus(getPortPoint());
+        if(request===generation&&connected)animations.setCharging(true);
+      }
     } finally { busy = false; button.disabled = false; }
   }
-  document.addEventListener('pointerdown',event=>{if(event.isTrusted)pendingFocus=false;},true);
-  document.addEventListener('wheel',event=>{if(event.isTrusted)pendingFocus=false;},true);
   const gesture = bindChargeGesture(button, canvas);
   button.onclick = event => { if (gesture.consumeClick(event)) { event.preventDefault(); return; } toggle().catch(error => { info.hidden=false; info.textContent=error.message; }); };
   function position() {
@@ -65,18 +66,18 @@ export function createChargingControl({ canvas, bridge, getPortPoint, getInstanc
       button.hidden = false;
       if (animations) {
         const state = animations.getChargingState();
-        if(pendingFocus&&connected&&state.portOpen>=.98&&bridge.camera){pendingFocus=false;cameraControl.focus(getPortPoint());}
+        button.dataset.hasCable = String(state.hasCable);
         button.dataset.portOpen = state.portOpen.toFixed(3);
         button.dataset.connection = state.connection.toFixed(3);
         button.dataset.opacity = state.opacity.toFixed(3);
         const label=info.querySelector('strong');
-        if (connected && label) label.textContent = state.portOpen < .98 ? 'Opening charge port' : state.connection < .98 ? 'Connecting charger' : 'Charging';
+        if (connected && label && !busy) label.textContent = state.portOpen < .98 ? 'Opening charge port' : state.connection < .98 ? 'Connecting charger' : 'Charging';
       }
     } else button.hidden = true;
     requestAnimationFrame(position);
   }
   requestAnimationFrame(position);
   return {
-    reset() { pendingFocus=false; cameraControl.cancel(); gesture.reset(); generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); document.documentElement.dataset.charging='false'; },
+    reset() { cameraControl.cancel(); gesture.reset(); generation++; clearTimeout(fadeTimer); info.dataset.visible='false'; animations=undefined; connected=false; button.hidden=true; info.hidden=true; button.setAttribute('aria-pressed','false'); button.setAttribute('aria-label','Open charge port and start charging'); document.documentElement.dataset.charging='false'; },
   };
 }

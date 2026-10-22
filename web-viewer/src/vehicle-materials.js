@@ -2,8 +2,6 @@
 export function sceneMaterial(materialName, nodeName = '', rear = false) {
   const name = materialName.toLowerCase();
   const part = nodeName.toLowerCase();
-  // Cybertruck's dark aero wheel covers should read as matte molded plastic.
-  if (name === 'wheel_rim__premium_wheel') return 'BottomCar';
   const lamp = /^(?:headlight|taillight)(?:__|$)|^trim__(?:lights?|brake)(?:_|$)|^trim__turnsignal.*brakes|^glass(?:_clear)?__glass_lights/.test(name);
   const rearName = /(?:brake|tail|rear|back)[_ .-]*(?:lights?|lamps?)|(?:lights?|lamps?)[_ .-]*(?:rear|trunk)|lights?_spoiler/.test(part);
   // Several APK meshes called "Headlights" contain both front and rear lamps.
@@ -28,4 +26,15 @@ export function sceneMaterial(materialName, nodeName = '', rear = false) {
   if (/paint/.test(name) && !/black|rough/.test(name)) return 'CarPaint';
   if (/chrome|metal|rim|wheel/.test(name)) return 'MetallicGray';
   return 'MetallicBlack02';
+}
+
+// Match road-wheel assemblies, since wheel_rim materials also appear on body trim.
+export function isRoadWheelNode(nodeName) {
+  return /^(?:Wheel_(?:Cybertruck_Premium|Arachnid|Cyberstream|Semi|Glider|Turbine)(?:_|\d|$)|Halo_22(?:_\d+)?$|Riptide_20(?:_\d+)?$|E80_Uberhelix(?:_\d+)?$|Helix2(?:_\d+)?$|E41[ _]Wheel(?:_\d+)?$)/i.test(nodeName);
+}
+
+export function wheelCoverMaterial(materialName, nodeName) {
+  if (!isRoadWheelNode(nodeName)) return null;
+  return /^wheel_rim__/i.test(materialName) ||
+    /^trim__CostDownMaterial$/i.test(materialName) ? 'BottomCar' : null;
 }

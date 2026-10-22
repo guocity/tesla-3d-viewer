@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sceneMaterial } from '../src/vehicle-materials.js';
+import { sceneMaterial, wheelCoverMaterial } from '../src/vehicle-materials.js';
 import { advanceToggle, advanceCharging } from '../src/showroom-animation.js';
 import { createVehicleBridge } from '../src/gpu-vehicle-bridge.js';
 
@@ -66,7 +66,7 @@ test('roof light bar is hidden by default and animates independently', async () 
   globalThis.cancelAnimationFrame=()=>{};
   try {
     const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
-    const rest=new Uint8Array(20);new DataView(rest.buffer).setInt16(0,10000,true);
+    const rest=new Uint8Array(40);new DataView(rest.buffer).setInt16(0,10000,true);new DataView(rest.buffer).setInt16(20,10000,true);
     const part={name:'Metal',rest,current:rest.slice()};
     const controller=createShowroomAnimation({ready:true,upload(){},reset(){}},panel);
     controller.bind({normalize:identity,quant:[1,1,1],nodes:[{name:'Roof_Lightbar',parent:-1,matrix:identity}],segments:[{node:0,material:'Metal',first:0,count:1}],animations:[]},[part]);
@@ -97,15 +97,16 @@ test('Cybertruck axis tracks open the cap before connecting and reverse on disco
   globalThis.requestAnimationFrame=callback=>{tick=callback;return 1;};globalThis.cancelAnimationFrame=()=>{};
   try {
     const identity=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
-    const rest=new Uint8Array(20);new DataView(rest.buffer).setInt16(0,10000,true);
+    const rest=new Uint8Array(40);new DataView(rest.buffer).setInt16(0,10000,true);new DataView(rest.buffer).setInt16(20,10000,true);
     const cap={name:'Metal',rest,current:rest.slice()};
     const controller=createShowroomAnimation({ready:true,upload(){},reset(){}},panel);
-    controller.bind({normalize:identity,quant:[1,1,1],nodes:[{name:'Charge_Cap_Spatial',parent:-1,matrix:identity},{name:'APK_ChargeCable',parent:-1,matrix:identity}],segments:[{node:0,material:'Metal',first:0,count:1}],animations:[{name:'ChargeportAnimation',duration:1,tracks:[{target:'Charge_Cap_Spatial:rotation_degrees:y',type:'bezier',interpolation:1,times:[0,1],values:[0,90],handles:[[0,0,1/3,30],[-1/3,-30,0,0]]}]}]},[cap]);
+    controller.bind({normalize:identity,quant:[1,1,1],nodes:[{name:'Charge_Cap_Spatial',parent:-1,matrix:identity},{name:'APK_ChargeCable',parent:-1,matrix:identity},{name:'Door_LF_Spatial',parent:-1,matrix:identity}],segments:[{node:0,material:'Metal',first:0,count:1},{node:2,material:'Metal',first:1,count:1}],animations:[{name:'ChargeportAnimation',duration:1,tracks:[{target:'Door_LF_Spatial:translation',type:'value',times:[0,1],values:[[0,0,0],[1,0,0]]}]},{name:'ChargeportAnimation',duration:1,tracks:[{target:'Charge_Cap_Spatial:rotation_degrees:y',type:'bezier',interpolation:1,times:[0,1],values:[0,90],handles:[[0,0,1/3,30],[-1/3,-30,0,0]]}]}]},[cap]);
     assert.equal(controller.setCharging(true),true);
     tick(1000);tick(1100);
     assert.equal(controller.getChargingState().connection,0);
     for(let t=1200;t<=3400;t+=100)tick(t);
     assert.equal(controller.getChargingState().connection,1);
+    assert.equal(new DataView(cap.current.buffer).getInt16(20,true),10000,'A mislabeled door clip must remain closed during charging');
     assert.ok(Math.abs(new DataView(cap.current.buffer).getInt16(0,true))<2);
     assert.ok(Math.abs(new DataView(cap.current.buffer).getInt16(4,true))>9990);
     controller.setCharging(false);
@@ -117,7 +118,7 @@ test('Cybertruck axis tracks open the cap before connecting and reverse on disco
   } finally {Object.assign(globalThis,previous);}
 });
 
-test('Cybertruck wheel covers use matte plastic while other metal rims stay metallic', () => {
-  assert.equal(sceneMaterial('wheel_rim__Premium_Wheel','Premium_Wheel'),'BottomCar');
+test('road wheel covers use matte plastic while body metal keeps its mapping', () => {
+  assert.equal(wheelCoverMaterial('wheel_rim__Premium_Wheel','Wheel_Cybertruck_Premium_FL'),'BottomCar');
   assert.equal(sceneMaterial('wheel_rim__Arachnid','Wheel'),'MetallicGray');
 });

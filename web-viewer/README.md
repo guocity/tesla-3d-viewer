@@ -85,10 +85,10 @@ vehicle-menu scrolling, search, vehicle toggles, charger dragging, direct canvas
 rotation, charging/disconnect and day/night. This is Chromium mobile emulation;
 physical iOS/Android browser checks are separate.
 
-Cybertruck's four Premium aero wheel covers use the matte `BottomCar` material
-preset, rather than the reflective metal rim preset. Other wheel finishes keep
-their existing material mapping.
+Road wheel covers on all vehicles use the matte `BottomCar` preset. Overrides
+match road wheel nodes and their rim materials; body and steering-wheel materials
+retain their original mapping.
 
 ## Charging and orbit controls
 
-Charging opens the source port and fades in the APK cable. A smooth green pulse travels from the cable end toward the handle using the original UV direction and 1.5-second timing. The port view transitions once, then leaves mouse and touch rotation free; input also interrupts an active transition. Mouse wheel and two-finger pinch zoom are supported. Wide framing keeps the physical camera on the showroom platform. The connected charge button docks away from the port without a tooltip. Browser regressions verify actual camera-position changes during charging rather than only checking that drag events arrive.
+Charging opens the source port and fades in the APK cable. A smooth green pulse travels from the cable end toward the handle using the original UV direction and 1.5-second timing. Charging moves to a low front-biased charge-port-side view in 260 ms, releases the camera for free orbit, then opens only the charge port and connects the cable. Camera geometry, reflection projection and every PBR material eye position move together, preserving the body finish. The connected charge button docks away from the port without a tooltip. Mouse/touch input interrupts the transition and remains available afterwards. Bayberry, E41 and E80 retain the source cable at their `ChargePortMarker` anchors. Vehicle fitting excludes the loose cable, which rests on the floor without moving the connected end.

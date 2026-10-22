@@ -47,7 +47,7 @@ manifest.scene = emit('scene', shell, 'scene');
 const catalog = JSON.parse(readFileSync(new URL('catalog.json', models)));
 for (const vehicle of catalog.vehicles) {
   const bytes = readFileSync(new URL(vehicle.file.replace(/^models\//, ''), models));
-  const inputHash = createHash('sha256').update(bytes).update(readFileSync(new URL('src/vehicle-scene.js', root))).update(readFileSync(new URL('src/vehicle-materials.js', root))).update(readFileSync(new URL('src/cybertruck-optics.js', root))).digest('hex');
+  const inputHash = createHash('sha256').update(bytes).update(readFileSync(new URL('src/vehicle-scene.js', root))).update(readFileSync(new URL('src/vehicle-materials.js', root))).update(readFileSync(new URL('src/charging-geometry.js', root))).update(readFileSync(new URL('src/cybertruck-optics.js', root))).digest('hex');
   const cachePath = new URL(`generated/${vehicle.id}.cache.json`, root);
   let record;
   if (existsSync(cachePath)) {

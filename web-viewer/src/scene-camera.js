@@ -15,7 +15,7 @@ export function cameraFromProjection(vp) {
 
 export function patchSceneCameraShader(source) {
   if(source.includes('uShowroomCameraEnabled'))return source;
-  if(!/_group_\w+\.(?:mvp|ivp)/.test(source))return source;
+  if(!/_group_\w+\.(?:mvp|ivp|eye|cam)/.test(source))return source;
   source=source.replace(/(_group_\w+\.mvp)\b/g,'showroomCameraMVP($1)')
     .replace(/(_group_\w+\.ivp)\b/g,'showroomCameraInverse($1)')
     .replace(/(_group_\w+\.(?:eye|cam))\b/g,'showroomCameraEye($1)');
@@ -42,8 +42,8 @@ export function createSceneCamera(canvas) {
     const offset=sourceCamera.eye.clone().sub(target);radius=offset.length();physicalLimit=radius;yaw=Math.atan2(offset.x,offset.z);pitch=Math.asin(clamp(offset.y/radius,-1,1));enabled=true;return true;
   }
   function pose(now=performance.now()) {
-    if(transition){const t=clamp((now-transition.start)/700,0,1),s=t*t*(3-2*t);
-      yaw=transition.yaw+transition.dyaw*s;pitch=transition.pitch+(.12-transition.pitch)*s;physicalLimit=transition.physicalLimit+(8.5-transition.physicalLimit)*s;radius=transition.radius+(transition.endRadius-transition.radius)*s;
+    if(transition){const t=clamp((now-transition.start)/260,0,1),s=t*t*(3-2*t);
+      yaw=transition.yaw+transition.dyaw*s;pitch=transition.pitch+(.08-transition.pitch)*s;physicalLimit=transition.physicalLimit+(6.5-transition.physicalLimit)*s;radius=transition.radius+(transition.endRadius-transition.radius)*s;
       target.copy(transition.target).lerp(transition.endTarget,s);
       if(t===1){const done=transition.done;transition=null;done?.();}
     }
@@ -68,12 +68,12 @@ export function createSceneCamera(canvas) {
   canvas.addEventListener?.('wheel',event=>{event.preventDefault();event.stopImmediatePropagation();zoom(event.deltaY);},{capture:true,passive:false});
   return {
     get current(){return current;},
-    reset(){sourceCamera=current=null;enabled=false;transition=null;mouse=null;touches.clear();target.set(0,.8,0);},
+    reset(){cancel();sourceCamera=current=null;enabled=false;transition=null;mouse=null;touches.clear();target.set(0,.8,0);},
     cancel,
     focus(point,done){
       if(!initialize()||!point)return false;cancel();
-      const rect=canvas.getBoundingClientRect(),heading=Math.atan2(point.chargeSide||-1,Math.sign(point.z)||1);
-      transition={start:performance.now(),yaw,dyaw:angle(heading-yaw),pitch,radius,physicalLimit,target:target.clone(),endTarget:new Vector3(0,.8,.5),endRadius:rect.width/rect.height<.8?15:10.5,done};return true;
+      const rect=canvas.getBoundingClientRect(),heading=Math.atan2(point.chargeSide||-1,-.45*(Math.sign(point.z)||1));
+      transition={start:performance.now(),yaw,dyaw:angle(heading-yaw),pitch,radius,physicalLimit,target:target.clone(),endTarget:new Vector3(0,.85,point.z*.25),endRadius:rect.width/rect.height<.8?10:6.5,done};return true;
     },
     observeUpload(gl,kind,destination,source,sourceOffset=0,length){
       if(!ArrayBuffer.isView(source))return;
@@ -91,9 +91,9 @@ export function createSceneCamera(canvas) {
         data=null;const active=gl.getUniformLocation(program,'uShowroomCameraEnabled');
         if(active!==null){
           const names=Array.from({length:gl.getProgramParameter(program,gl.ACTIVE_UNIFORMS)},(_,i)=>gl.getActiveUniform(program,i).name);
-          const name=names.find(n=>n.endsWith('_fs.ivp'))||names.find(n=>n.endsWith('.ivp'))||names.find(n=>n.endsWith('_vs.mvp'))||names.find(n=>n.endsWith('.mvp')); 
+          const name=names.find(n=>n.endsWith('_fs.ivp'))||names.find(n=>n.endsWith('.ivp'))||names.find(n=>n.endsWith('_vs.mvp'))||names.find(n=>n.endsWith('.mvp'))||names.find(n=>n.endsWith('_fs.eye'))||names.find(n=>n.endsWith('.eye'))||names.find(n=>n.endsWith('.cam')); 
           if(name){const prefix=name.slice(0,name.lastIndexOf('.')),modelName=`${prefix}.model`,indices=gl.getUniformIndices(program,[name,...(names.includes(modelName)?[modelName]:[])]),offsets=gl.getActiveUniforms(program,indices,gl.UNIFORM_OFFSET),block=gl.getActiveUniforms(program,[indices[0]],gl.UNIFORM_BLOCK_INDEX)[0];
-            data={active,delta:gl.getUniformLocation(program,'uShowroomCameraDelta'),inverse:gl.getUniformLocation(program,'uShowroomCameraInverse'),eye:gl.getUniformLocation(program,'uShowroomCameraEye'),binding:gl.getActiveUniformBlockParameter(program,block,gl.UNIFORM_BLOCK_BINDING),offset:offsets[0],model:offsets[1],isInverse:name.endsWith('.ivp'),values:new Float32Array(Math.max(...offsets)+64>>2)};
+            data={active,delta:gl.getUniformLocation(program,'uShowroomCameraDelta'),inverse:gl.getUniformLocation(program,'uShowroomCameraInverse'),eye:gl.getUniformLocation(program,'uShowroomCameraEye'),binding:gl.getActiveUniformBlockParameter(program,block,gl.UNIFORM_BLOCK_BINDING),offset:offsets[0],model:offsets[1],eyeOnly:/\.(eye|cam)$/.test(name),isInverse:name.endsWith('.ivp'),values:new Float32Array(Math.max(...offsets)+64>>2)};
           }
         }programs.set(program,data);
       }
@@ -105,6 +105,14 @@ export function createSceneCamera(canvas) {
       const size=data.values.byteLength,cached=ranges.find(r=>r.start<=start&&r.start+r.bytes.length>=start+size);
       if(cached)new Uint8Array(data.values.buffer).set(cached.bytes.subarray(start-cached.start,start-cached.start+size));
       else {const previous=gl.getParameter(gl.COPY_READ_BUFFER_BINDING);gl.bindBuffer(gl.COPY_READ_BUFFER,buffer);gl.getBufferSubData(gl.COPY_READ_BUFFER,start,data.values);gl.bindBuffer(gl.COPY_READ_BUFFER,previous);}
+      if (data.eyeOnly) {
+        if (!enabled) return;
+        const originalEye=new Vector3().fromArray(data.values,data.offset/4);
+        if (originalEye.length()<1) return;
+        const eye=pose();if(originalEye.y<0)eye.y=-eye.y;
+        gl.uniform1f(data.active,1);if(data.eye)gl.uniform3f(data.eye,eye.x,eye.y,eye.z);
+        return;
+      }
       const vp=new Matrix4().fromArray(data.values,data.offset/4),model=data.model===undefined?null:new Matrix4().fromArray(data.values,data.model/4);
       if(data.isInverse)vp.invert();else if(model)vp.multiply(model.clone().invert());
       const source=cameraFromProjection(vp);if(!source||!Number.isFinite(source.eye.length())||source.eye.length()<1)return;

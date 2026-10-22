@@ -105,7 +105,7 @@ export function createShowroomAnimation(bridge, panel) {
     panel.dataset.ready='true';status.textContent=`${clips.filter(c=>c.target).length} enabled`;
     if(document.hidden)return;
     for(const c of clips)if(c.current!==c.target){c.current=advanceToggle(c.current,c.target,Math.min(elapsed/1000,0.1),c.duration);dirty=true;}
-    const ports = clips.filter(c => /^chargeport(?:global)?animation$/i.test(c.button.dataset.clip));
+    const ports = clips.filter(c => c.chargePort);
     const portOpen = ports.length ? Math.min(...ports.map(c=>c.current)) : 1;
     const nextConnection = advanceCharging(connection, charging, portOpen, Math.min(elapsed/1000,.1));
     if (nextConnection !== connection) { connection = nextConnection; dirty = true; }
@@ -132,35 +132,41 @@ export function createShowroomAnimation(bridge, panel) {
         times: [0, .6], values: [[0, 0, 0], roofBar.restS.toArray()],
       }] }] : [];
       for(const source of [...(rig.animations || []), ...roofAnimation, ...cybertruckLampClips(nodes)]){
-        const tracks=(source.tracks||[]).map(track=>{const [path, ...property] = track.target.split(':');return{node:resolve(path),property:property.length?property.join(':'):'transform',track};}).filter(t=>t.node!==undefined);
+        const chargeName=/^chargeport(?:global)?animation$/i.test(source.name);
+        const portTracks=(source.tracks||[]).filter(t=>/charge[_ .-]*(?:cap|port)/i.test(t.target.split(':')[0]));
+        // Some extracted clips reuse the ChargeportAnimation label on doors.
+        // Charging may drive only tracks bound to the physical charge-port nodes.
+        const chargePort=chargeName&&portTracks.length>0;
+        const sourceTracks=chargePort?portTracks:(source.tracks||[]);
+        const tracks=sourceTracks.map(track=>{const [path, ...property] = track.target.split(':');return{node:resolve(path),property:property.length?property.join(':'):'transform',track};}).filter(t=>t.node!==undefined);
         if(!tracks.length)continue;
         const button=document.createElement('button');button.type='button';button.className='motion-switch';button.setAttribute('role','switch');button.setAttribute('aria-checked','false');button.dataset.clip=source.name;
         const label=document.createElement('span');label.textContent=labels[source.name]||source.name.replace(/Animation$/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
         button.append(label);if(!source.hiddenControl)list.append(button);
         const initial=Number(Boolean(source.defaultOn));
         button.setAttribute('aria-checked',String(Boolean(initial)));
-        const clip={tracks,duration:source.duration||1,current:initial,target:initial,button,alwaysApply:Boolean(source.alwaysApply),exclusiveGroup:source.exclusiveGroup,blink:source.blink};button.onclick=()=>setTarget(clip,clip.target?0:1);clips.push(clip);
+        const clip={tracks,chargePort,duration:source.duration||1,current:initial,target:initial,button,alwaysApply:Boolean(source.alwaysApply),exclusiveGroup:source.exclusiveGroup,blink:source.blink};button.onclick=()=>setTarget(clip,clip.target?0:1);clips.push(clip);
       }
     },
     getChargePortPoint() {
       const index = cableNodes[0];
       if (index === undefined || !normalization) return null;
       const point = new Vector3().setFromMatrixPosition(nodes[index].world).applyMatrix4(normalization);
-      point.chargeSide = Math.sign(new Vector3(0,0,-1).transformDirection(nodes[index].world).x) || -1;
+      point.chargeSide = Math.sign(point.x) || -1;
       return point;
     },
     getChargingState() {
-      const ports = clips.filter(c => /^chargeport(?:global)?animation$/i.test(c.button.dataset.clip));
+      const ports = clips.filter(c => c.chargePort);
       return { portOpen: ports.length ? Math.min(...ports.map(c=>c.current)) : 1, connection, opacity:chargingOpacity(connection), hasCable: cableNodes.length>0 };
     },
     refresh() { if (rig && bridge.ready) { apply(); dirty=false; } },
     setCharging(on) {
       charging=on; chargeManaged=true; dirty=true;
-      if (on) for (const c of clips.filter(c => /^chargeport(?:global)?animation$/i.test(c.button.dataset.clip))) setTarget(c,1);
+      if (on) for (const c of clips.filter(c => c.chargePort)) setTarget(c,1);
       return cableNodes.length>0;
     },
     setChargePort(open) {
-      const ports = clips.filter(c => /^chargeport(?:global)?animation$/i.test(c.button.dataset.clip));
+      const ports = clips.filter(c => c.chargePort);
       ports.forEach(c => setTarget(c, Number(open)));
       return ports.length > 0;
     },

@@ -1,4 +1,4 @@
-import { createSceneCamera, patchSceneCameraShader } from './scene-camera.js';
+import { createNativeCamera } from './native-camera.js';
 import { createChargingFlow, patchChargingFlowShader } from './charging-flow.js';
 import { createAdScreen } from './ad-screen.js';
 import { patchChargingFadeShader } from './charging-fade.js';
@@ -8,7 +8,7 @@ export function createVehicleBridge(canvas) {
   const ads = typeof Image === "undefined" ? null : createAdScreen();
   const contexts = new WeakSet();
   const chargingFlow = createChargingFlow();
-  const camera = createSceneCamera(canvas);
+  const camera = createNativeCamera(canvas);
   let parts = [], matched = new Map(), reveal, lastProbe = 0;
   function probe(gl) {
     if (!reveal || performance.now() - lastProbe < 100 || !gl.drawingBufferWidth) return;
@@ -32,7 +32,7 @@ export function createVehicleBridge(canvas) {
     contexts.add(gl);
     if (gl.shaderSource) {
       const shaderSource = gl.shaderSource;
-      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchSceneCameraShader(patchChargingFlowShader(patchChargingFadeShader(ads?.patchShader(source) ?? source)))); };
+      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchChargingFlowShader(patchChargingFadeShader(ads?.patchShader(source) ?? source))); };
     }
     for (const method of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced','drawRangeElements','blitFramebuffer','flush']) {
       const originalDraw = gl[method];
