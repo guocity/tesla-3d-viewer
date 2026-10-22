@@ -41,9 +41,7 @@ async page => {
       if(bar.some(b=>b.r.height<44||b.r.width<44)||Math.max(...bar.map(b=>b.r.y+b.r.height/2))-Math.min(...bar.map(b=>b.r.y+b.r.height/2))>2)throw Error(`Mobile toolbar ${width}x${height}: ${JSON.stringify(bar)}`);
       await tap(mobile.locator('.model-trigger'));
       await bounds('.model-menu');
-      await mobile.locator('.model-search input').fill('Semi');
-      if(await mobile.locator('.model-option').count()!==1)throw Error('Mobile car search failed');
-      await mobile.locator('.model-search input').fill('');
+      if(await mobile.locator('input:not([readonly])').count())throw Error('Viewer must not open the keyboard');
       const list=await mobile.locator('.model-options').boundingBox();
       await swipe(list.x+list.width/2,list.y+list.height-8,0,-Math.max(20,list.height-16));
       if(await mobile.locator('.model-options').evaluate(e=>e.scrollTop)<=0)throw Error('Car list did not scroll by touch');
@@ -56,7 +54,7 @@ async page => {
       await tap(mobile.locator('.showroom-motion [data-close]'));
       await tap(mobile.locator('[data-settings]'));await bounds('.tesla-display-settings');
       await tap(mobile.locator('[data-settings]'));
-      results.push(`${width}x${height}: layout, one-row toolbar, touch menus, search, scroll, controls`);
+      results.push(`${width}x${height}: layout, one-row toolbar, touch menus, no keyboard, scroll, controls`);
     }
     await viewport(390,844);
     await tap(mobile.locator('.scene-appearance'));

@@ -1,3 +1,4 @@
+import { bindViewerTouch, preventViewerKeyboard } from './viewer-touch.js';
 import { createChargingControl } from './charging-control.js';
 import { createTeslaChrome } from './tesla-chrome.js';
 import { toggleSceneAppearance } from './scene-appearance.js';
@@ -31,6 +32,8 @@ const quality = panel.querySelector('#quality');
 const status = document.getElementById('rive-status');
 const canvas = document.querySelector('#rive-stage canvas');
 canvas.tabIndex = -1;
+bindViewerTouch(canvas);
+preventViewerKeyboard(document);
 let instance, manifest, shellPromise, token = 0;
 const bridge = createVehicleBridge(canvas);
 let animationController, animationModule, currentParts, currentRig;
@@ -99,8 +102,8 @@ async function showVehicle() {
   // Reload through the existing renderer so its GPU context stays valid.
   const load = { buffer, artboard: 'Garage', stateMachine: 'Garage', autoplay: true, autoBind: true, enableGPUCanvas: true };
   if (instance) instance.load(load);
-  else instance = new rive.Rive({ ...load, canvas, enableMultiTouch: true,
-    focusOptions: { allowFocusInterrupt: true },
+  else instance = new rive.Rive({ ...load, canvas, enableMultiTouch: false,
+    focusOptions: { allowFocusInterrupt: false },
     layout: new rive.Layout({ fit: 'layout', alignment: 'center' }),
     onLoad: () => {
       const vm = instance.viewModelInstance;
