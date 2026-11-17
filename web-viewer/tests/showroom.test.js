@@ -101,6 +101,7 @@ test('Cybertruck axis tracks open the cap before connecting and reverse on disco
     const cap={name:'Metal',rest,current:rest.slice()};
     const controller=createShowroomAnimation({ready:true,upload(){},reset(){}},panel);
     controller.bind({normalize:identity,quant:[1,1,1],nodes:[{name:'Charge_Cap_Spatial',parent:-1,matrix:identity},{name:'APK_ChargeCable',parent:-1,matrix:identity},{name:'Door_LF_Spatial',parent:-1,matrix:identity}],segments:[{node:0,material:'Metal',first:0,count:1},{node:2,material:'Metal',first:1,count:1}],animations:[{name:'ChargeportAnimation',duration:1,tracks:[{target:'Door_LF_Spatial:translation',type:'value',times:[0,1],values:[[0,0,0],[1,0,0]]}]},{name:'ChargeportAnimation',duration:1,tracks:[{target:'Charge_Cap_Spatial:rotation_degrees:y',type:'bezier',interpolation:1,times:[0,1],values:[0,90],handles:[[0,0,1/3,30],[-1/3,-30,0,0]]}]}]},[cap]);
+    assert.equal(panel.querySelector('.motion-switches').children.length,1,'Mislabeled non-port ChargeportAnimation clips must not add duplicate buttons');
     assert.equal(controller.setCharging(true),true);
     tick(1000);tick(1100);
     assert.equal(controller.getChargingState().connection,0);

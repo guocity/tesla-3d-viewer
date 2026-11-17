@@ -59,3 +59,32 @@ test('PBR fragment eye follows the camera even without a matrix uniform',()=>{
   assert.ok(patched.includes('vec4 color=exposureOut(albedo)'));
   assert.equal(patchSceneCameraShader(patched),patched);
 });
+
+test('wheel and touch pinch zoom in on spread/scroll-up and out on pinch/scroll-down',t=>{
+  const events={},windowBefore=globalThis.window;globalThis.window={addEventListener(){}};t.after(()=>{if(windowBefore===undefined)delete globalThis.window;else globalThis.window=windowBefore;});
+  const canvas={addEventListener:(type,callback)=>events[type]=callback,getBoundingClientRect:()=>({width:1100,height:760})};
+  const camera=createSceneCamera(canvas),program={},buffer={},values=new Float32Array(32);
+  values.set(projection().multiply(view(new Vector3(6,2,8))).elements);values.set(new Matrix4().elements,16);
+  const gl={CURRENT_PROGRAM:1,ACTIVE_UNIFORMS:2,UNIFORM_OFFSET:3,UNIFORM_BLOCK_INDEX:4,UNIFORM_BLOCK_BINDING:5,UNIFORM_BUFFER_BINDING:6,UNIFORM_BUFFER_START:7,COPY_READ_BUFFER_BINDING:8,COPY_READ_BUFFER:9,
+    getParameter:key=>key===1?program:null,getUniformLocation:(_,name)=>name,getProgramParameter:()=>2,getActiveUniform:(_,i)=>({name:['_group_0_binding_0_vs.mvp','_group_0_binding_0_vs.model'][i]}),getUniformIndices:()=>[0,1],getActiveUniforms:(_,indices,key)=>key===3?indices.map(i=>i*64):[0],getActiveUniformBlockParameter:()=>0,getIndexedParameter:key=>key===6?buffer:0,bindBuffer(){},getBufferSubData:(_,offset,target)=>target.set(values),uniform1f(){},uniform3f(){},uniformMatrix4fv(){}};
+  camera.beforeDraw(gl);
+  const noop=()=>{};
+  events.wheel({deltaY:-120,preventDefault:noop,stopImmediatePropagation:noop});
+  camera.beforeDraw(gl);
+  const afterScrollUp=camera.current.zoom;
+  assert.ok(afterScrollUp<new Vector3(6,2,8).distanceTo(new Vector3(0,.8,0)),'scroll up / trackpad pinch-out zooms in');
+  events.wheel({deltaY:240,preventDefault:noop,stopImmediatePropagation:noop});
+  camera.beforeDraw(gl);
+  assert.ok(camera.current.zoom>afterScrollUp,'scroll down / trackpad pinch-in zooms out');
+  const touch=(x1,x2)=>({changedTouches:[{identifier:1,clientX:x1,clientY:200},{identifier:2,clientX:x2,clientY:200}],preventDefault:noop,stopImmediatePropagation:noop});
+  const beforePinch=camera.current.zoom;
+  events.touchstart(touch(100,200));
+  events.touchmove(touch(50,250));
+  camera.beforeDraw(gl);
+  const afterPinchOut=camera.current.zoom;
+  assert.ok(afterPinchOut<beforePinch,'touch pinch-out zooms in');
+  events.touchmove(touch(120,180));
+  camera.beforeDraw(gl);
+  assert.ok(camera.current.zoom>afterPinchOut,'touch pinch-in zooms out');
+  events.touchend(touch(120,180));
+});

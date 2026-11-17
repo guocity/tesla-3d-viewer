@@ -1,4 +1,4 @@
-import { Box3, BufferGeometry, CircleGeometry, Float32BufferAttribute, Mesh, Vector3 } from 'three';
+import { Box3, BufferGeometry, CircleGeometry, Float32BufferAttribute, Mesh, SphereGeometry, Vector3 } from 'three';
 
 // Cut the combined side emitters at the lower edge of the authored center DRL.
 // Clip intersecting triangles too, so the seam is level rather than diagonal.
@@ -64,5 +64,71 @@ export function correctCybertruckFrontLamps(root) {
     projector.rotation.y=Math.PI/2;projector.position.set(box.max.x+.002,center.y,center.z);
     fixture.add(projector);
   }
+  root.updateMatrixWorld(true);
+}
+
+// Model Y exports an upper front Headlights shell that relied on an illumination
+// alpha/emission atlas (Lights_E_Y_High.png). Without the atlas in RCP2, the
+// entire headlight housing glows solid white. Strip the broad upper front
+// overlay so the dark Lights housing shows through clear Lights_Glass, and
+// supply focused internal LED projector bulbs inside each housing.
+export function correctModelYFrontLamps(root, vehicleId = '') {
+  if (vehicleId !== 'modely_high') return;
+  const fixture = root.getObjectByName('Headlights');
+  if (!fixture?.isMesh || fixture.getObjectByName('Headlight_Bulb_Inner_Left')) return;
+  root.updateMatrixWorld(true);
+  const emitter = Array.isArray(fixture.material) ? fixture.material[0] : fixture.material;
+  const src = fixture.geometry;
+  const count = src.index?.count ?? src.attributes.position.count;
+  const point = new Vector3();
+  const kept = [];
+  for (let i = 0; i < count; i += 3) {
+    const tri = [0, 1, 2].map(j => src.index ? src.index.getX(i + j) : i + j);
+    let cx = 0, cy = 0;
+    for (const idx of tri) {
+      point.fromBufferAttribute(src.attributes.position, idx).applyMatrix4(fixture.matrixWorld);
+      cx += point.x / 3;
+      cy += point.y / 3;
+    }
+    if (cx <= 1.5 || cy <= 0.6) kept.push(...tri);
+  }
+  if (src.index) {
+    src.setIndex(kept);
+  } else {
+    const attributes = Object.entries(src.attributes);
+    const out = Object.fromEntries(attributes.map(([name]) => [name, []]));
+    for (const idx of kept) {
+      for (const [name, attr] of attributes) {
+        for (let k = 0; k < attr.itemSize; k++) out[name].push(attr.array[idx * attr.itemSize + k]);
+      }
+    }
+    for (const [name, attr] of attributes) src.setAttribute(name, new Float32BufferAttribute(out[name], attr.itemSize));
+  }
+  src.clearGroups();
+  const bulbs = [
+    ['Inner', 2.045, 0.780, 0.610],
+    ['Outer', 1.975, 0.795, 0.710],
+  ];
+  const invWorld = fixture.matrixWorld.clone().invert();
+  for (const [label, x, y, zAbs] of bulbs) {
+    for (const [side, sign] of [['Left', -1], ['Right', 1]]) {
+      const bulb = new Mesh(new SphereGeometry(0.022, 24, 16), emitter);
+      bulb.name = `Headlight_Bulb_${label}_${side}`;
+      bulb.position.set(x, y, zAbs * sign).applyMatrix4(invWorld);
+      fixture.add(bulb);
+    }
+  }
+  // Keep the lower turn signal strips dark when not blinking instead of lighting
+  // them solid white alongside the inner headlight projector bulbs.
+  for (const signalName of ['Left_Turn_Signal', 'Right_Turn_Signal']) {
+    const signal = root.getObjectByName(signalName);
+    if (!signal?.isMesh) continue;
+    const mat = (Array.isArray(signal.material) ? signal.material[0] : signal.material)?.clone();
+    if (mat) {
+      mat.name = 'trim__Lights';
+      signal.material = mat;
+    }
+  }
+  // Keep the rear and roof glass passes intact so factory-tinted glazing stays dark.
   root.updateMatrixWorld(true);
 }

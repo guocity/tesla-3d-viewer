@@ -1,10 +1,14 @@
 const encoder = new TextEncoder();
 const MAGIC = encoder.encode('RCP2');
 
-function findBytes(bytes, pattern) {
-  outer: for (let i = 0; i <= bytes.length - pattern.length; i++) {
-    for (let j = 0; j < pattern.length; j++) if (bytes[i + j] !== pattern[j]) continue outer;
-    return i;
+function findBytes(bytes, pattern, from = 0) {
+  const first = pattern[0], len = pattern.length, limit = bytes.length - len;
+  for (let i = from; (i = bytes.indexOf(first, i)) !== -1 && i <= limit; i++) {
+    let match = true;
+    for (let j = 1; j < len; j++) {
+      if (bytes[i + j] !== pattern[j]) { match = false; break; }
+    }
+    if (match) return i;
   }
   return -1;
 }
@@ -51,8 +55,11 @@ export function replaceVehicleBlob(source, replacement, teslaCaption = true) {
   // Keep the authored string byte lengths and Rive property framing intact.
   const bmw = encoder.encode('BMW XM');
   const tesla = encoder.encode('TESLA ');
-  let offset;
-  while (teslaCaption && (offset = findBytes(result, bmw)) >= 0) result.set(tesla, offset);
+  let offset = 0;
+  while (teslaCaption && (offset = findBytes(result, bmw, offset)) >= 0) {
+    result.set(tesla, offset);
+    offset += bmw.length;
+  }
   return result.buffer;
 }
 

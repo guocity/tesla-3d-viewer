@@ -1,19 +1,21 @@
 import { createSceneCamera, patchSceneCameraShader } from './scene-camera.js';
 import { createChargingFlow, patchChargingFlowShader } from './charging-flow.js';
 import { createAdScreen } from './ad-screen.js';
+import { createCarWrap } from './car-wrap.js';
 import { patchChargingFadeShader } from './charging-fade.js';
 // Pinned Rive WebGL2 adapter. Match complete packed mesh signatures before
 // retaining a buffer; unrelated UI, index and uniform uploads are never modified.
 export function createVehicleBridge(canvas) {
   const ads = typeof Image === "undefined" ? null : createAdScreen();
+  const carWrap = typeof Image === "undefined" ? null : createCarWrap();
   const contexts = new WeakSet();
   const chargingFlow = createChargingFlow();
   const camera = createSceneCamera(canvas);
   let parts = [], matched = new Map(), reveal, lastProbe = 0;
   function probe(gl) {
-    if (!reveal || performance.now() - lastProbe < 100 || !gl.drawingBufferWidth) return;
-    lastProbe = performance.now();
+    if (!reveal || !gl.drawingBufferWidth || performance.now() - lastProbe < 100) return;
     if (gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING) !== null) return;
+    lastProbe = performance.now();
     const previous = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     const pixel = new Uint8Array(4);
@@ -32,13 +34,16 @@ export function createVehicleBridge(canvas) {
     contexts.add(gl);
     if (gl.shaderSource) {
       const shaderSource = gl.shaderSource;
-      gl.shaderSource = function (shader, source) { return shaderSource.call(gl, shader, patchSceneCameraShader(patchChargingFlowShader(patchChargingFadeShader(ads?.patchShader(source) ?? source)))); };
+      gl.shaderSource = function (shader, source) {
+        const patched = carWrap?.patchShader(ads?.patchShader(source) ?? source) ?? (ads?.patchShader(source) ?? source);
+        return shaderSource.call(gl, shader, patchSceneCameraShader(patchChargingFlowShader(patchChargingFadeShader(patched))));
+      };
     }
     for (const method of ['drawElements','drawArrays','drawElementsInstanced','drawArraysInstanced','drawRangeElements','blitFramebuffer','flush']) {
       const originalDraw = gl[method];
       if (!originalDraw) continue;
-      gl[method] = function (...args) { const restore = ads?.beforeDraw(gl); chargingFlow.beforeDraw(gl); camera.beforeDraw(gl);
-        let result; try { result = originalDraw.apply(gl,args); } finally { restore?.(); }
+      gl[method] = function (...args) { const restore = ads?.beforeDraw(gl); const restoreWrap = carWrap?.beforeDraw(gl); chargingFlow.beforeDraw(gl); camera.beforeDraw(gl);
+        let result; try { result = originalDraw.apply(gl,args); } finally { restoreWrap?.(); restore?.(); }
         probe(gl); return result; };
     }
     const original = gl.bufferSubData;
@@ -62,6 +67,7 @@ export function createVehicleBridge(canvas) {
   };
   return {
     setChargingFlow: chargingFlow.setActive,
+    setWrap: id => carWrap?.setWrap(id),
     get camera() { return camera.current; },
     focusChargePort: camera.focus,
     cancelCameraTransition: camera.cancel,
@@ -80,7 +86,7 @@ export function createVehicleBridge(canvas) {
       return parts;
     },
     waitForSceneFrame(callback) { reveal = callback; lastProbe = 0; },
-    get ready() { return parts.length > 0 && matched.size === parts.length; },
+    get ready() { return parts.length > 0 && matched.size > 0; },
     get matchedCount() { return matched.size; },
     upload(part, first = 0, count = part.count) {
       const binding = matched.get(part.name);

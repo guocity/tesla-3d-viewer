@@ -59,7 +59,7 @@ export function createSceneCamera(canvas) {
   }
   const cancel=()=>{if(transition){const done=transition.done;transition=null;done?.('interrupted');}};
   function rotate(dx,dy){if(!initialize())return;cancel();yaw-=dx*.006;pitch=clamp(pitch+dy*.006,.06,1.25);}
-  function zoom(delta){if(!initialize())return;cancel();radius=clamp(radius*Math.exp(-delta*.0012),4,28);}
+  function zoom(delta){if(!initialize())return;cancel();radius=clamp(radius*Math.exp(delta*.0012),4,28);}
   let mouse=null,touches=new Map();
   canvas.addEventListener?.('mousedown',event=>{if(event.button!==0)return;initialize();cancel();mouse={x:event.clientX,y:event.clientY};event.preventDefault();event.stopImmediatePropagation();},true);
   canvas.addEventListener?.('mousemove',event=>{if(mouse){rotate(event.clientX-mouse.x,event.clientY-mouse.y);mouse={x:event.clientX,y:event.clientY};}event.stopImmediatePropagation();},true);
@@ -71,7 +71,7 @@ export function createSceneCamera(canvas) {
     if(type==='touchstart'){initialize();cancel();}
     for(const point of event.changedTouches){if(type==='touchend'||type==='touchcancel')touches.delete(point.identifier);else touches.set(point.identifier,{x:point.clientX,y:point.clientY});}
     const after=touchState();
-    if(type==='touchmove'&&before&&after){if(before.distance&&after.distance)zoom(Math.log(after.distance/before.distance)/.0012);else if(!before.distance&&!after.distance)rotate(after.x-before.x,after.y-before.y);}
+    if(type==='touchmove'&&before&&after){if(before.distance&&after.distance)zoom(Math.log(before.distance/after.distance)/.0012);else if(!before.distance&&!after.distance)rotate(after.x-before.x,after.y-before.y);}
   },{capture:true,passive:false});
   canvas.addEventListener?.('wheel',event=>{event.preventDefault();event.stopImmediatePropagation();zoom(event.deltaY);},{capture:true,passive:false});
   return {

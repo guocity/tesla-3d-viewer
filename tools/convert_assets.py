@@ -612,7 +612,7 @@ def should_skip_node(node_name: str, hidden_set: set[str]) -> bool:
         "interior_6_seater", "interior_7_seater",
         "body_original", "bumper_f_original", "hood_original", "lights_original", "lights_glass_original",
         "drl_original", "turn_signal_original", "headlights_original",
-        "doorcard_2_0", "blocker", "floor_longrange",
+        "blocker", "floor_longrange",
     ]
     if nl == "floor":
         return True

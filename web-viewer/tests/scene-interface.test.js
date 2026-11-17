@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots } from '../src/scene-interface.js';
+import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots, hideRiveBranding } from '../src/scene-interface.js';
 
 test('media edit preserves all authored scene bytes and object indices', () => {
   const original = readFileSync(new URL('../public/reference/file.riv', import.meta.url));
@@ -39,6 +39,16 @@ test('legacy hotspots are collapsed so their hit targets are disabled', () => {
   assert.equal(result.length, original.length + 40);
   for (const name of ['Pin 0','Pin 1','Pin 2','Pin 3']) {
     const marker = Buffer.from([4,name.length,...Buffer.from(name),5,34,16,0,0,0,0,17,0,0,0,0,0]);
+    assert.ok(result.includes(marker), `${name} must have zero scale on both axes`);
+  }
+});
+
+test('Rive branding nodes are collapsed so no Rive logo renders', () => {
+  const original = readFileSync(new URL('../public/reference/file.riv', import.meta.url));
+  const result = Buffer.from(hideRiveBranding(Uint8Array.from(original).buffer));
+  assert.equal(result.length, original.length + 50);
+  for (const [name, parent] of [['Intro', 0], ['RIVE_Wordmark_ROOT', 0], ['NuRiveWordmark01', 2], ['NuRiveBrandmark01', 2]]) {
+    const marker = Buffer.from([4, name.length, ...Buffer.from(name), 5, parent, 16, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0]);
     assert.ok(result.includes(marker), `${name} must have zero scale on both axes`);
   }
 });

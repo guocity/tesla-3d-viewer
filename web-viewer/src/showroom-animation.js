@@ -16,7 +16,7 @@ export function advanceCharging(current, connected, portOpen, elapsed) {
 export function createShowroomAnimation(bridge, panel) {
   panel.innerHTML = '<div class="motion-heading"><div><span class="model-eyebrow">TESLA</span><h2>Vehicle controls</h2></div><button type="button" data-close aria-label="Close vehicle controls">×</button></div><div class="motion-switches" role="group" aria-label="Tesla vehicle controls"></div><div class="motion-caption"><span data-status>Choose a Tesla to animate</span><span>Combine any controls</span></div>';
   const list = panel.querySelector('.motion-switches'), status = panel.querySelector('[data-status]');
-  let rig, parts, nodes = [], restWorld = [], normalization, inverseNormalization, segments = [], clips = [], last = 0, frame, dirty = false, charging = false, connection = 0, chargeManaged = false, cableNodes = [];
+  let rig, parts, nodes = [], restWorld = [], normalization, inverseNormalization, segments = [], clips = [], last = 0, frame, dirty = false, charging = false, connection = 0, chargeManaged = false, cableNodes = [], lastMatched = 0;
   const position = new Vector3(), normal = new Vector3(), euler = new Euler(0, 0, 0, 'YXZ');
   const deltas = new Map();
   function resetNodes() { for (const n of nodes) { n.p.copy(n.restP); n.q.copy(n.restQ); n.s.copy(n.restS); } }
@@ -102,6 +102,7 @@ export function createShowroomAnimation(bridge, panel) {
   function tick(now){
     frame=requestAnimationFrame(tick);if(!last)last=now;const elapsed=now-last;if(elapsed<1000/24)return;last=now;
     if(!rig)return;if(!bridge.ready){status.textContent='Preparing showroom…';return;}
+    if((bridge.matchedCount ?? 0)!==lastMatched){lastMatched=bridge.matchedCount ?? 0;dirty=true;}
     panel.dataset.ready='true';status.textContent=`${clips.filter(c=>c.target).length} enabled`;
     if(document.hidden)return;
     for(const c of clips)if(c.current!==c.target){c.current=advanceToggle(c.current,c.target,Math.min(elapsed/1000,0.1),c.duration);dirty=true;}
@@ -119,7 +120,7 @@ export function createShowroomAnimation(bridge, panel) {
   frame=requestAnimationFrame(tick);
   return {
     bind(nextRig,nextParts){
-      rig=nextRig;parts=nextParts;nodes=[];segments=rig?.segments||[];clips=[];dirty=true;charging=false;connection=0;chargeManaged=false;cableNodes=[];list.replaceChildren();panel.dataset.ready='false';panel.dataset.active='0';
+      rig=nextRig;parts=nextParts;nodes=[];segments=rig?.segments||[];clips=[];dirty=true;lastMatched=0;charging=false;connection=0;chargeManaged=false;cableNodes=[];list.replaceChildren();panel.dataset.ready='false';panel.dataset.active='0';
       if(!rig){status.textContent='APK controls are available on Tesla models';return;}
       normalization=new Matrix4().fromArray(rig.normalize);inverseNormalization=normalization.clone().invert();
       nodes=rig.nodes.map(n=>{const p=new Vector3(),q=new Quaternion(),s=new Vector3();new Matrix4().fromArray(n.matrix).decompose(p,q,s);return{...n,p,q,s,restP:p.clone(),restQ:q.clone(),restS:s.clone(),local:new Matrix4(),world:new Matrix4()};});
@@ -135,8 +136,9 @@ export function createShowroomAnimation(bridge, panel) {
         const chargeName=/^chargeport(?:global)?animation$/i.test(source.name);
         const portTracks=(source.tracks||[]).filter(t=>/charge[_ .-]*(?:cap|port)/i.test(t.target.split(':')[0]));
         // Some extracted clips reuse the ChargeportAnimation label on doors.
-        // Charging may drive only tracks bound to the physical charge-port nodes.
-        const chargePort=chargeName&&portTracks.length>0;
+        // Skip mislabeled non-port clips so only the physical charge port appears.
+        if(chargeName&&!portTracks.length)continue;
+        const chargePort=chargeName;
         const sourceTracks=chargePort?portTracks:(source.tracks||[]);
         const tracks=sourceTracks.map(track=>{const [path, ...property] = track.target.split(':');return{node:resolve(path),property:property.length?property.join(':'):'transform',track};}).filter(t=>t.node!==undefined);
         if(!tracks.length)continue;

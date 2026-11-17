@@ -1,5 +1,5 @@
 import { vehicleBodyBounds, groundChargingCable } from './charging-geometry.js';
-import { splitCybertruckRearLamps, correctCybertruckFrontLamps } from './cybertruck-optics.js';
+import { splitCybertruckRearLamps, correctCybertruckFrontLamps, correctModelYFrontLamps } from './cybertruck-optics.js';
 import { Box3, Matrix3, Matrix4, Vector3 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -21,13 +21,14 @@ function octNormal(n) {
   return [Math.round(x * 32767), Math.round(y * 32767)];
 }
 
-export async function convertVehicle(url, { includeRig = false } = {}) {
+export async function convertVehicle(url, { includeRig = false, vehicleId = '' } = {}) {
   const loader = new GLTFLoader();
   const gltf = url instanceof ArrayBuffer ? await loader.parseAsync(url, '') : await loader.loadAsync(url);
   const root = gltf.scene;
   try {
     splitCybertruckRearLamps(root);
     correctCybertruckFrontLamps(root);
+    correctModelYFrontLamps(root, vehicleId);
     root.updateMatrixWorld(true);
     let box = vehicleBodyBounds(root);
     let size = box.getSize(new Vector3());
@@ -113,6 +114,7 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
       // Preserve the APK cable flow coordinate in spare color channels.
       // It stays independent of the showroom material texture transforms.
       const flowUV = mesh.userData.effect === 'chargeFlow' ? geometry.attributes.uv : null;
+      const wrapUV = name === 'CarPaint' ? (geometry.attributes.uv1 || geometry.attributes.uv2 || geometry.attributes.uv) : null;
       let at = offset + 64;
       for (let i = 0; i < positions.count; i++, at += 20) {
         p.fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld);
@@ -122,7 +124,11 @@ export async function convertVehicle(url, { includeRig = false } = {}) {
         const oct = octNormal(normal);
         view.setInt16(at + 8, oct[0], true);
         view.setInt16(at + 10, oct[1], true);
-        bytes.set([255, 255, 255, 255], at + 16);
+        if (wrapUV) {
+          view.setUint16(at + 12, Math.round(Math.max(0, Math.min(1, wrapUV.getX(i))) * 65535), true);
+          view.setUint16(at + 14, Math.round(Math.max(0, Math.min(1, wrapUV.getY(i))) * 65535), true);
+        }
+        bytes.set([255, 255, 255, name === 'CarPaint' ? 0 : 255], at + 16);
         if (flowUV) {
           bytes[at + 17] = Math.round(Math.max(0, Math.min(1, flowUV.getX(i))) * 255);
           bytes[at + 18] = 0;

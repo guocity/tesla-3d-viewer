@@ -2,7 +2,7 @@ import { bindViewerTouch, preventViewerKeyboard } from './viewer-touch.js';
 import { createChargingControl } from './charging-control.js';
 import { createTeslaChrome } from './tesla-chrome.js';
 import { toggleSceneAppearance } from './scene-appearance.js';
-import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots } from './scene-interface.js';
+import { hideSceneMedia, hideOriginalMenus, disableVehicleHotspots, hideRiveBranding } from './scene-interface.js';
 import { createVehicleBridge } from './gpu-vehicle-bridge.js';
 import * as rive from '@rive-app/webgl2';
 import wasmUrl from '@rive-app/webgl2/rive.wasm?url';
@@ -12,6 +12,7 @@ import '../public/reference/hosted.css';
 import './vehicle-selector.css';
 import './tesla-controls.css';
 import { createModelPicker } from './model-picker.js';
+import { WRAP_OPTIONS } from './car-wrap.js';
 
 rive.RuntimeLoader.setWasmUrl(wasmUrl);
 rive.RuntimeLoader.setWasmFallbackUrl(fallbackWasmUrl);
@@ -36,13 +37,15 @@ bindViewerTouch(canvas);
 preventViewerKeyboard(document);
 let instance, manifest, shellPromise, token = 0;
 const bridge = createVehicleBridge(canvas);
-let animationController, animationModule, currentParts, currentRig;
+let animationController, currentParts, currentRig;
 const motionPanel = document.createElement('section');
 new MutationObserver(() => mode.setAttribute('aria-expanded', String(!motionPanel.hidden))).observe(motionPanel, { attributes: true, attributeFilter: ['hidden'] });
 motionPanel.className = 'showroom-motion'; motionPanel.hidden = true; motionPanel.setAttribute('aria-label', 'Showroom animations'); document.body.append(motionPanel);
 const packedCache = new Map();
 const loader = import(/* @vite-ignore */ new URL('asset-loader.js', base).href);
-function progress(text) { status.hidden = false; status.classList.remove('error'); status.querySelector('.message').textContent = text; }
+const manifestPromise = fetch(new URL('manifest.json', assetBase), { cache: 'no-store' });
+let animationModule = import('./showroom-animation.js');
+function progress(text) { status.hidden = true; status.classList.remove('error'); status.querySelector('.message').textContent = text; }
 function error(e) { status.classList.add('error'); status.hidden = false; status.querySelector('.message').textContent = e.message; console.error(e); }
 function resize() { instance?.resizeDrawingSurfaceToCanvas(quality.value === 'smooth' ? Math.min(devicePixelRatio, 1.25) : Math.min(devicePixelRatio, 2)); }
 new ResizeObserver(resize).observe(canvas);
@@ -69,6 +72,7 @@ async function showVehicle() {
   const request = ++token;
   const selected = select.value;
   const vehicle = manifest.vehicles.find(v => v.id === selected);
+  syncWrapForVehicle(selected);
   charging.reset();
   appearance.disabled = true;
   animationController?.stop();
@@ -78,27 +82,33 @@ async function showVehicle() {
   delete document.getElementById('rive-stage').dataset.ready;
   progress(`Loading ${vehicle?.name || 'BMW XM'}…`);
   const { readAsset } = await loader;
-  shellPromise ||= readAsset(new URL(manifest.scene.file, assetBase).href).catch(e => { shellPromise = null; throw e; });
+  shellPromise ||= readAsset(new URL(manifest.scene.file, assetBase).href)
+    .then(raw => hideRiveBranding(disableVehicleHotspots(hideOriginalMenus(hideSceneMedia(raw)))))
+    .catch(e => { shellPromise = null; throw e; });
   const entry = selected === 'bmw' ? manifest.bmw : vehicle?.packed;
   if (!entry) throw new Error('This vehicle is unavailable. Choose another car.');
-  let packed = packedCache.get(selected);
-  if (!packed) {
-    packed = await readAsset(new URL(entry.file, assetBase).href, bytes => {
-      if (request === token) progress(`Loading ${vehicle?.name || 'BMW XM'} · ${Math.min(100, Math.round(bytes / entry.bytes * 100))}%`);
-    });
+  const cachedPacked = packedCache.get(selected);
+  const packedPromise = cachedPacked ? Promise.resolve(cachedPacked) : readAsset(new URL(entry.file, assetBase).href, bytes => {
+    if (request === token) progress(`Loading ${vehicle?.name || 'BMW XM'} · ${Math.min(100, Math.round(bytes / entry.bytes * 100))}%`);
+  }).then(data => {
     if (packedCache.size >= 2) packedCache.delete(packedCache.keys().next().value);
-    packedCache.set(selected, packed);
-  }
+    packedCache.set(selected, data);
+    return data;
+  });
   const rigPromise = vehicle?.rig ? readAsset(new URL(vehicle.rig.file, assetBase).href).then(b => JSON.parse(new TextDecoder().decode(b))) : Promise.resolve(null);
-  const [shell, , rig] = await Promise.all([shellPromise, runtimeReady, rigPromise]);
+  const rigReady = Promise.all([rigPromise, ensureAnimations()]).then(([rig]) => {
+    if (request !== token) return;
+    currentRig = rig;
+    animationController?.bind(currentRig, currentParts);
+    animationController?.refresh();
+  });
+  const [shell, packed] = await Promise.all([shellPromise, packedPromise, runtimeReady]);
   if (request !== token) return;
   progress('Starting scene…');
   currentParts = bridge.setVehicle(packed);
-  currentRig = rig;
-  animationController?.bind(currentRig, currentParts);
-  await ensureAnimations();
-  if (request !== token) return;
-  const buffer = disableVehicleHotspots(hideOriginalMenus(hideSceneMedia(replaceVehicleBlob(shell.slice(0), packed, selected !== 'bmw'))));
+  currentRig = null;
+  rigReady.catch(error);
+  const buffer = replaceVehicleBlob(shell, packed, selected !== 'bmw');
   // Reload through the existing renderer so its GPU context stays valid.
   const load = { buffer, artboard: 'Garage', stateMachine: 'Garage', autoplay: true, autoBind: true, enableGPUCanvas: true };
   if (instance) instance.load(load);
@@ -114,8 +124,10 @@ async function showVehicle() {
       resize();
       let finished = false;
       const loadedToken = token;
-      const reveal = () => {
+      const reveal = async () => {
         if (finished || loadedToken !== token) return; finished = true;
+        await rigReady.catch(() => {});
+        if (loadedToken !== token) return;
         animationController?.refresh();
         if (nightMode) toggleSceneNight();
         appearance.disabled = false;
@@ -126,14 +138,14 @@ async function showVehicle() {
       bridge.waitForSceneFrame(reveal);
       // Some drivers resolve their default framebuffer outside the intercepted
       // draw calls. Never leave the scene hidden waiting for a pixel probe.
-      setTimeout(reveal, 6000);
+      setTimeout(reveal, 1500);
     },
     onLoadError: () => error(new Error('The scene could not be loaded. Select another car to retry.')),
   });
 }
 async function boot() {
   progress('Loading vehicle catalog…');
-  const response = await fetch(new URL('manifest.json', assetBase), { cache: 'no-store' });
+  const response = await manifestPromise;
   if (!response.ok) throw new Error('Prepared assets are missing. Run pnpm prepare:assets.');
   manifest = await response.json();
   for (const vehicle of manifest.vehicles) select.add(new Option(vehicle.name, vehicle.id));
@@ -173,6 +185,70 @@ const chrome = createTeslaChrome({
   setDefrost(on) { const vm = instance?.viewModelInstance; if (vm) vm.number('defrost').value = Number(on); },
 });
 panel.querySelector('label[for=quality]')?.remove();
+
+let syncWrapForVehicle = () => {};
+const bottomBar = document.querySelector('.tesla-bottom');
+if (bottomBar) {
+  const wrapPicker = document.createElement('div');
+  wrapPicker.className = 'tesla-wrap-picker';
+  const wrapBtn = document.createElement('button');
+  wrapBtn.type = 'button';
+  wrapBtn.id = 'wrap';
+  wrapBtn.className = 'tesla-wrap-trigger';
+  wrapBtn.setAttribute('aria-haspopup', 'menu');
+  wrapBtn.setAttribute('aria-expanded', 'false');
+  const wrapMenu = document.createElement('div');
+  wrapMenu.className = 'wrap-menu';
+  wrapMenu.setAttribute('role', 'menu');
+  wrapMenu.hidden = true;
+
+  let activeWrap = WRAP_OPTIONS.some(o => o.id === params.get('wrap')) ? params.get('wrap') : 'none';
+  function applyWrap(id) {
+    activeWrap = WRAP_OPTIONS.some(o => o.id === id) ? id : 'none';
+    bridge.setWrap(select.value === 'modely_high' ? activeWrap : 'none');
+    const current = WRAP_OPTIONS.find(o => o.id === activeWrap) || WRAP_OPTIONS[0];
+    wrapBtn.textContent = `Wrap · ${current.name}`;
+    wrapBtn.setAttribute('aria-pressed', String(activeWrap !== 'none'));
+    for (const item of wrapMenu.querySelectorAll('.wrap-option')) {
+      item.setAttribute('aria-checked', String(item.dataset.value === activeWrap));
+    }
+    if (activeWrap === 'none') params.delete('wrap');
+    else params.set('wrap', activeWrap);
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
+  function closeWrapMenu() {
+    wrapMenu.hidden = true;
+    wrapBtn.setAttribute('aria-expanded', 'false');
+  }
+  syncWrapForVehicle = vehicleId => {
+    const supported = vehicleId === 'modely_high';
+    wrapPicker.hidden = !supported;
+    if (!supported) closeWrapMenu();
+    bridge.setWrap(supported ? activeWrap : 'none');
+  };
+  for (const opt of WRAP_OPTIONS) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'wrap-option';
+    item.dataset.value = opt.id;
+    item.setAttribute('role', 'menuitemradio');
+    item.textContent = opt.name;
+    item.onclick = () => { applyWrap(opt.id); closeWrapMenu(); };
+    wrapMenu.append(item);
+  }
+  wrapBtn.onclick = () => {
+    const open = !wrapMenu.hidden;
+    wrapMenu.hidden = open;
+    wrapBtn.setAttribute('aria-expanded', String(!open));
+  };
+  document.addEventListener('pointerdown', e => { if (!wrapPicker.contains(e.target)) closeWrapMenu(); });
+  wrapPicker.addEventListener('keydown', e => { if (e.key === 'Escape' && !wrapMenu.hidden) { e.stopPropagation(); closeWrapMenu(); wrapBtn.focus(); } });
+  applyWrap(activeWrap);
+  wrapPicker.append(wrapBtn, wrapMenu);
+  const spacer = bottomBar.querySelector('.tesla-bar-spacer');
+  if (spacer) bottomBar.insertBefore(wrapPicker, spacer);
+  else bottomBar.append(wrapPicker);
+}
 
 const charging = createChargingControl({
   bridge, getPortPoint: () => animationController?.getChargePortPoint(),

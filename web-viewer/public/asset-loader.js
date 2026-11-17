@@ -10,19 +10,21 @@ export async function readAsset(url, onProgress = () => {}) {
   }
   const total = Number(response.headers.get('Content-Length'));
   const reader = response.body.getReader();
-  const chunks = [];
-  let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value); loaded += value.byteLength;
-    onProgress(loaded, total);
-  }
-  const blob = new Blob(chunks);
-  // Gzip containers use .bin names so static servers do not auto-decompress them.
-  const signature = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
-  if (signature[0] === 0x1f && signature[1] === 0x8b) {
-    return new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  }
-  return blob.arrayBuffer();
+  const first = await reader.read();
+  if (first.done) return new ArrayBuffer(0);
+  let loaded = first.value.byteLength;
+  onProgress(loaded, total);
+  const gzipped = first.value.byteLength >= 2 && first.value[0] === 0x1f && first.value[1] === 0x8b;
+  const stream = new ReadableStream({
+    start(controller) { controller.enqueue(first.value); },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) { controller.close(); return; }
+      loaded += value.byteLength;
+      onProgress(loaded, total);
+      controller.enqueue(value);
+    },
+    cancel(reason) { return reader.cancel(reason); },
+  });
+  return new Response(gzipped ? stream.pipeThrough(new DecompressionStream('gzip')) : stream).arrayBuffer();
 }
